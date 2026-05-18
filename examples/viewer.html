@@ -175,8 +175,8 @@ function applyMovement(dt) {
   if (keys['KeyS'] || keys['ArrowDown'])  controls.moveForward(-speed);
   if (keys['KeyA'] || keys['ArrowLeft'])  controls.moveRight(-speed);
   if (keys['KeyD'] || keys['ArrowRight']) controls.moveRight(speed);
-  if (keys['Space'])                      camera.position.y += speed;
-  if (keys['KeyC'])                       camera.position.y -= speed;
+  if (keys['Space'])                      camera.position.y += speed * 0.2;
+  if (keys['KeyC'])                       camera.position.y -= speed * 0.2;
 }
 
 // ── Material ──────────────────────────────────────────────────────────────────
