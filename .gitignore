@@ -1,25 +1,34 @@
-*.pyc
-*.egg-info
-*.pt
-*.pth
-*.zip
-*.tar.gz
-*.render*
+# ── Virtual environment ────────────────────────────────────────────────────────
+.venv/
+
+# ── Generated point clouds ────────────────────────────────────────────────────
 *.ply
+examples/*.ply
+examples/models.json
 
-**/__pycache__/
+# ── User upload sets ──────────────────────────────────────────────────────────
+uploads/
 
-.vscode
-ckpts
+# ── Pi3 bundled example media (large) ─────────────────────────────────────────
+examples/*.mp4
+examples/*.avi
+examples/*.mov
+examples/gradio_examples/
+examples/house/
+examples/man_walking_long/
+examples/parkour/
+examples/valley/
+examples/room/
 
-/checkpoints
-/data
-/logs
-/outputs
-/utils/debug.py
-/configs/data/full.yaml
-*_check/
-/utils/utils_ceph.py
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
 
-resize_demo_imgs.py
-img_dir_to_video.py
+# ── Misc ──────────────────────────────────────────────────────────────────────
+.DS_Store
+*.swp

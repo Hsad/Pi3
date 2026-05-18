@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pi3 — Upload & Generate</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #111; color: #eee; font-family: sans-serif;
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── Header ── */
+header {
+  display: flex; align-items: center; gap: 12px; padding: 11px 18px;
+  background: rgba(12,12,18,0.97); border-bottom: 1px solid #222;
+  flex-shrink: 0;
+}
+header h1 { font-size: 15px; color: #8cf; letter-spacing: 0.04em; flex: 1; }
+header a {
+  font-size: 12px; color: #789; text-decoration: none;
+  padding: 5px 11px; border: 1px solid #333; border-radius: 5px;
+}
+header a:hover { background: #1a1a2a; color: #aac; }
+
+/* ── Two-column layout ── */
+main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Left panel ── */
+#left {
+  width: 320px; flex-shrink: 0; border-right: 1px solid #1e1e2e;
+  display: flex; flex-direction: column; background: #0e0e16;
+}
+
+.panel-head {
+  font-size: 10px; color: #68a; letter-spacing: 0.09em; text-transform: uppercase;
+  font-weight: 700; padding: 12px 14px 9px; border-bottom: 1px solid #1a1a28;
+  flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+}
+.panel-head span { font-weight: normal; color: #555; text-transform: none; letter-spacing: 0; }
+
+/* folder create */
+#folder-create {
+  display: flex; gap: 6px; padding: 9px 11px;
+  border-bottom: 1px solid #181828; flex-shrink: 0;
+}
+#new-folder-input {
+  flex: 1; background: #181828; border: 1px solid #2a2a40; color: #dde;
+  padding: 6px 8px; border-radius: 5px; font-size: 12px;
+}
+#new-folder-input:focus { outline: 1px solid #47a; }
+#create-folder-btn {
+  background: #1b2e48; border: 1px solid #385878; color: #7ab;
+  padding: 6px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; white-space: nowrap;
+}
+#create-folder-btn:hover { background: #213855; }
+
+/* folder list */
+#folder-list { flex: 0 0 auto; max-height: 220px; overflow-y: auto; border-bottom: 1px solid #181828; }
+.folder-row {
+  display: flex; align-items: center; gap: 7px; padding: 7px 11px;
+  cursor: pointer; border-bottom: 1px solid #141422; user-select: none;
+}
+.folder-row:hover { background: #141422; }
+.folder-row.active { background: #122038; border-left: 3px solid #47a; padding-left: 8px; }
+.folder-row .fi  { font-size: 14px; }
+.folder-row .fn  { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-row .fc  { font-size: 10px; color: #555; background: #1a1a28; padding: 1px 5px; border-radius: 8px; }
+.folder-row .dx  { font-size: 12px; color: #555; padding: 2px 5px; border-radius: 3px; cursor: pointer; }
+.folder-row .dx:hover { color: #e55; background: #2a1818; }
+
+/* file list */
+#file-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+#file-list { flex: 1; overflow-y: auto; min-height: 0; }
+.file-row {
+  display: flex; align-items: center; gap: 7px; padding: 5px 11px;
+  border-bottom: 1px solid #141422; font-size: 12px; color: #aaa;
+}
+.file-row .fi  { font-size: 13px; }
+.file-row .fn  { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row .dx  { font-size: 11px; color: #444; cursor: pointer; padding: 1px 4px; border-radius: 3px; }
+.file-row .dx:hover { color: #e55; background: #2a1818; }
+#file-empty { padding: 20px 14px; font-size: 12px; color: #444; text-align: center; }
+
+/* drop zone */
+#drop-zone {
+  margin: 10px 11px; border: 2px dashed #252538; border-radius: 7px;
+  padding: 18px 10px; text-align: center; cursor: pointer;
+  color: #555; font-size: 12px; transition: all 0.15s; flex-shrink: 0;
+}
+#drop-zone:hover, #drop-zone.over { border-color: #47a; color: #79c; background: #0b0b18; }
+#drop-zone small { display: block; margin-top: 4px; font-size: 10px; color: #3a3a55; }
+#file-input-h { display: none; }
+#upload-msg { font-size: 11px; color: #6ab; text-align: center; padding: 4px 0; min-height: 18px; flex-shrink: 0; }
+
+/* ── Right panel ── */
+#right { flex: 1; overflow-y: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 18px; }
+
+.section {
+  border: 1px solid #1a1a28; border-radius: 8px; overflow: hidden;
+}
+.section-title {
+  font-size: 10px; color: #68a; letter-spacing: 0.09em; text-transform: uppercase;
+  font-weight: 700; padding: 9px 14px; background: #0e0e18; border-bottom: 1px solid #1a1a28;
+}
+.section-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 11px; }
+
+.row { display: flex; flex-direction: column; gap: 4px; }
+.row label {
+  display: flex; justify-content: space-between; font-size: 12px; color: #999;
+}
+.row label .v { color: #dde; font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
+.row .hint { font-size: 10px; color: #484860; line-height: 1.4; }
+input[type=range] { width: 100%; accent-color: #47a; cursor: pointer; }
+
+.row select, .row input[type=text] {
+  width: 100%; background: #181828; border: 1px solid #2a2a40; color: #dde;
+  padding: 6px 8px; border-radius: 5px; font-size: 12px; cursor: pointer;
+}
+.row select:focus, .row input[type=text]:focus { outline: 1px solid #47a; }
+
+/* generate button */
+#gen-btn {
+  padding: 11px; background: #1b2e48; border: 1px solid #385878;
+  color: #7ab; border-radius: 7px; cursor: pointer; font-size: 14px;
+  font-weight: 700; letter-spacing: 0.03em; transition: background 0.15s;
+}
+#gen-btn:hover:not(:disabled) { background: #213855; }
+#gen-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* log */
+#log-wrap { display: none; }
+#log-box {
+  background: #090910; border: 1px solid #1e1e2e; border-radius: 6px;
+  padding: 10px 12px; font-family: monospace; font-size: 11px; color: #7b9;
+  height: 210px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+}
+#open-btn {
+  display: none; margin-top: 10px; padding: 9px; width: 100%;
+  background: #162a1c; border: 1px solid #2a5832; color: #5d5;
+  border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 700;
+  text-align: center; text-decoration: none;
+}
+#open-btn:hover { background: #1a3522; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pi3 — Upload &amp; Generate</h1>
+  <a href="/examples/viewer.html">← Viewer</a>
+</header>
+
+<main>
+
+  <!-- ── Left: upload sets ── -->
+  <div id="left">
+    <div class="panel-head">Upload Sets</div>
+
+    <div id="folder-create">
+      <input id="new-folder-input" type="text" placeholder="New set name…" maxlength="64">
+      <button id="create-folder-btn">+ Create</button>
+    </div>
+
+    <div id="folder-list"></div>
+
+    <div id="file-section">
+      <div class="panel-head">
+        Files
+        <span id="set-label">select a set above</span>
+      </div>
+      <div id="file-list"><div id="file-empty">No set selected</div></div>
+
+      <div id="drop-zone">
+        📂 Drop images or videos here
+        <small>or click to browse — PNG · JPG · MP4 · MOV</small>
+      </div>
+      <input type="file" id="file-input-h" multiple
+             accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/avi,.mkv">
+      <div id="upload-msg"></div>
+
+      <!-- shown only when the set contains a video -->
+      <div id="extract-section" style="display:none; border-top:1px solid #181828; padding:9px 11px; flex-shrink:0;">
+        <div style="font-size:10px;color:#68a;text-transform:uppercase;letter-spacing:0.08em;font-weight:700;margin-bottom:7px;">Extract Frames from Video</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;">
+          <label style="font-size:11px;color:#777;white-space:nowrap;">Every</label>
+          <input type="number" id="extract-iv" min="1" max="120" value="5"
+                 style="width:52px;background:#181828;border:1px solid #2a2a40;color:#dde;padding:4px 6px;border-radius:4px;font-size:12px;text-align:center;">
+          <label style="font-size:11px;color:#777;white-space:nowrap;">frames</label>
+          <button id="extract-btn"
+                  style="flex:1;background:#1b2e48;border:1px solid #385878;color:#7ab;padding:5px 8px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;">
+            Extract
+          </button>
+        </div>
+        <div id="extract-msg" style="font-size:10px;color:#6ab;min-height:14px;"></div>
+        <div style="font-size:10px;color:#484860;line-height:1.4;">
+          Saves frames as JPEGs so you can review and delete unwanted ones before generating.
+          Generation will use interval&nbsp;=&nbsp;1 (all extracted frames).
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right: generate ── -->
+  <div id="right">
+
+    <div class="section">
+      <div class="section-title">Source</div>
+      <div class="section-body">
+        <div class="row">
+          <label>Upload set</label>
+          <select id="src-select"><option value="">— select a set —</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" id="sampling-section" style="display:none;">
+      <div class="section-title">Sampling</div>
+      <div class="section-body">
+        <div class="row">
+          <label>Frame Skip <span class="v" id="iv-val">10</span></label>
+          <input type="range" id="iv" min="1" max="60" step="1" value="10">
+          <div class="hint">Sample 1 frame every N from the video. Higher = faster but sparser coverage.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Filtering</div>
+      <div class="section-body">
+        <div class="row">
+          <label>Confidence Threshold <span class="v" id="conf-val">0.10</span></label>
+          <input type="range" id="conf" min="0.01" max="0.99" step="0.01" value="0.10">
+          <div class="hint">Higher = keep only more certain points. Raise this when scenes contain people, glass, or reflective surfaces.</div>
+        </div>
+        <div class="row">
+          <label>Edge Tolerance <span class="v" id="rtol-val">0.030</span></label>
+          <input type="range" id="rtol" min="0.005" max="0.150" step="0.005" value="0.030">
+          <div class="hint">Controls depth-edge aggressiveness. Lower = sharper but more holes. Higher = denser but messier edges.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Post-Processing</div>
+      <div class="section-body">
+        <div class="row">
+          <label>Voxel Downsample Size <span class="v" id="voxel-val">0.020</span></label>
+          <input type="range" id="voxel" min="0.000" max="0.100" step="0.005" value="0.020">
+          <div class="hint">Merge nearby points into one per voxel cell. 0 = disabled. Larger = smaller file, faster load.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Quality / VRAM</div>
+      <div class="section-body">
+        <div class="row">
+          <label>Max Resolution</label>
+          <select id="pxlimit">
+            <option value="100000">Low — 100 k px &nbsp;(fast, ~4 GB VRAM)</option>
+            <option value="255000" selected>Medium — 255 k px &nbsp;(default, ~6 GB)</option>
+            <option value="500000">High — 500 k px &nbsp;(~9 GB VRAM)</option>
+            <option value="1000000">Ultra — 1 M px &nbsp;(~11 GB VRAM)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Output</div>
+      <div class="section-body">
+        <div class="row">
+          <label>Filename (.ply)</label>
+          <input type="text" id="out-name" placeholder="my_scan">
+        </div>
+      </div>
+    </div>
+
+    <button id="gen-btn" disabled>Generate</button>
+
+    <div id="log-wrap" class="section">
+      <div class="section-title">Progress</div>
+      <div class="section-body">
+        <div id="log-box"></div>
+        <a id="open-btn" href="/examples/viewer.html" target="_blank">Open in Viewer ↗</a>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+let activeFolder   = null;
+let setHasVideo    = false;  // any video present (show Extract section)
+let setIsPureVideo = false;  // video with NO images (show Frame Skip slider)
+let busy = false;
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+
+const $  = id => document.getElementById(id);
+const jfetch = (url, opts) => fetch(url, opts).then(r => r.json());
+
+// ── Folders ────────────────────────────────────────────────────────────────
+
+async function refreshFolders() {
+  const folders = await jfetch('/folders');
+  const list    = $('folder-list');
+  const sel     = $('src-select');
+  const prevSel = sel.value;
+
+  list.innerHTML = '';
+  sel.innerHTML  = '<option value="">— select a set —</option>';
+
+  folders.forEach(f => {
+    const icon = f.has_video ? '🎬' : '🖼️';
+
+    // sidebar row
+    const row = document.createElement('div');
+    row.className = 'folder-row' + (f.name === activeFolder ? ' active' : '');
+    row.innerHTML = `
+      <span class="fi">${icon}</span>
+      <span class="fn">${f.name}</span>
+      <span class="fc">${f.count}</span>
+      <span class="dx" title="Delete set">✕</span>`;
+    row.querySelector('.fn').onclick = () => pickFolder(f.name);
+    row.querySelector('.fi').onclick = () => pickFolder(f.name);
+    row.querySelector('.fc').onclick = () => pickFolder(f.name);
+    row.querySelector('.dx').onclick = async e => {
+      e.stopPropagation();
+      if (!confirm(`Delete set "${f.name}" and all its files?`)) return;
+      await jfetch(`/folders/${enc(f.name)}`, { method: 'DELETE' });
+      if (activeFolder === f.name) { activeFolder = null; renderFiles([]); }
+      refreshFolders();
+    };
+    list.appendChild(row);
+
+    // generate select option
+    sel.appendChild(new Option(`${icon}  ${f.name}  (${f.count})`, f.name));
+  });
+
+  // restore dropdown selection
+  if (prevSel) sel.value = prevSel;
+  if (!sel.value && activeFolder) sel.value = activeFolder;
+  updateGenBtn();
+}
+
+async function pickFolder(name) {
+  activeFolder = name;
+  $('set-label').textContent = name;
+
+  const outEl = $('out-name');
+  if (!outEl.dataset.edited) outEl.value = name;
+
+  $('src-select').value = name;
+  await refreshFolders();
+  await refreshFiles();
+  updateGenBtn();
+}
+
+// ── Files ──────────────────────────────────────────────────────────────────
+
+const enc = encodeURIComponent;
+const VIDEO_EXT = new Set(['mp4','mov','avi','mkv']);
+const IMG_EXT   = new Set(['png','jpg','jpeg','webp']);
+
+async function refreshFiles() {
+  if (!activeFolder) return renderFiles([]);
+  const files = await jfetch(`/folders/${enc(activeFolder)}/files`);
+  renderFiles(files);
+}
+
+function updateSamplingVisibility() {
+  $('sampling-section').style.display = setIsPureVideo ? '' : 'none';
+  $('extract-section').style.display  = setHasVideo    ? '' : 'none';
+}
+
+function renderFiles(files) {
+  const hasImages = files.some(n => IMG_EXT.has(n.split('.').pop().toLowerCase()));
+  setHasVideo    = files.some(n => VIDEO_EXT.has(n.split('.').pop().toLowerCase()));
+  setIsPureVideo = setHasVideo && !hasImages;
+  updateSamplingVisibility();
+
+  const list = $('file-list');
+  list.innerHTML = '';
+  if (!files.length) {
+    list.innerHTML = `<div id="file-empty">${activeFolder ? 'No files yet — drop some below' : 'No set selected'}</div>`;
+    return;
+  }
+  files.forEach(name => {
+    const ext  = name.split('.').pop().toLowerCase();
+    const icon = VIDEO_EXT.has(ext) ? '🎬' : IMG_EXT.has(ext) ? '🖼️' : '📄';
+    const row  = document.createElement('div');
+    row.className = 'file-row';
+    row.innerHTML  = `<span class="fi">${icon}</span><span class="fn" title="${name}">${name}</span><span class="dx">✕</span>`;
+    row.querySelector('.dx').onclick = async () => {
+      await jfetch(`/folders/${enc(activeFolder)}/files/${enc(name)}`, { method: 'DELETE' });
+      refreshFiles(); refreshFolders();
+    };
+    list.appendChild(row);
+  });
+}
+
+// ── Upload ─────────────────────────────────────────────────────────────────
+
+const dz = $('drop-zone');
+dz.addEventListener('click', () => {
+  if (!activeFolder) return alert('Create or select a set first.');
+  $('file-input-h').click();
+});
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', ()  => dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  if (!activeFolder) return alert('Create or select a set first.');
+  doUpload([...e.dataTransfer.files]);
+});
+$('file-input-h').addEventListener('change', e => {
+  if (e.target.files.length) doUpload([...e.target.files]);
+  e.target.value = '';
+});
+
+async function doUpload(files) {
+  if (!activeFolder || !files.length) return;
+  const msg = $('upload-msg');
+  msg.textContent = `Uploading ${files.length} file(s)…`;
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+  await fetch(`/folders/${enc(activeFolder)}/files`, { method: 'POST', body: fd });
+  msg.textContent = '';
+  refreshFiles(); refreshFolders();
+}
+
+// ── Folder create ──────────────────────────────────────────────────────────
+
+$('create-folder-btn').addEventListener('click', async () => {
+  const name = $('new-folder-input').value.trim();
+  if (!name) return;
+  await jfetch(`/folders/${enc(name)}`, { method: 'POST' });
+  $('new-folder-input').value = '';
+  await refreshFolders();
+  pickFolder(name);
+});
+$('new-folder-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('create-folder-btn').click();
+});
+
+// Sync generate dropdown → sidebar highlight
+$('src-select').addEventListener('change', e => {
+  if (e.target.value) pickFolder(e.target.value);
+});
+
+// Track manual edits to output name
+$('out-name').addEventListener('input', e => { e.target.dataset.edited = '1'; });
+
+// ── Extract frames ─────────────────────────────────────────────────────────
+
+$('extract-btn').addEventListener('click', async () => {
+  if (!activeFolder) return;
+  const msg = $('extract-msg');
+  const btn = $('extract-btn');
+  btn.disabled = true;
+  msg.textContent = 'Extracting…';
+  try {
+    const res = await jfetch(`/folders/${enc(activeFolder)}/extract-video`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interval: +$('extract-iv').value }),
+    });
+    if (res.error) {
+      msg.textContent = `Error: ${res.error}`;
+    } else {
+      msg.textContent = `✓ Extracted ${res.extracted} frames from ${res.video}`;
+      await refreshFiles();
+      await refreshFolders();
+    }
+  } catch (e) {
+    msg.textContent = 'Extraction failed.';
+  }
+  btn.disabled = false;
+});
+
+// ── Sliders ────────────────────────────────────────────────────────────────
+
+function bindSlider(id, valId, fmt) {
+  const el  = $(id);
+  const out = $(valId);
+  el.addEventListener('input', () => { out.textContent = fmt(+el.value); });
+}
+bindSlider('iv',    'iv-val',   v => v.toFixed(0));
+bindSlider('conf',  'conf-val', v => v.toFixed(2));
+bindSlider('rtol',  'rtol-val', v => v.toFixed(3));
+bindSlider('voxel', 'voxel-val',v => v.toFixed(3));
+
+// ── Generate ───────────────────────────────────────────────────────────────
+
+function updateGenBtn() {
+  $('gen-btn').disabled = !$('src-select').value || busy;
+}
+$('src-select').addEventListener('change', updateGenBtn);
+
+$('gen-btn').addEventListener('click', async () => {
+  const folder = $('src-select').value;
+  if (!folder) return;
+
+  busy = true;
+  updateGenBtn();
+  $('gen-btn').textContent = 'Generating…';
+
+  const logWrap = $('log-wrap');
+  const logBox  = $('log-box');
+  const openBtn = $('open-btn');
+  logWrap.style.display = 'block';
+  logBox.textContent    = '';
+  openBtn.style.display = 'none';
+
+  const payload = {
+    folder,
+    interval:       setIsPureVideo ? +$('iv').value : 1,
+    conf_threshold: +$('conf').value,
+    edge_rtol:      +$('rtol').value,
+    voxel_size:     +$('voxel').value,
+    pixel_limit:    +$('pxlimit').value,
+    output_name:    $('out-name').value.trim() || folder,
+  };
+
+  const { job_id } = await jfetch('/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const es = new EventSource(`/jobs/${job_id}`);
+  es.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.log !== undefined) {
+      logBox.textContent += d.log + '\n';
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+    if (d.status === 'done') {
+      es.close(); busy = false;
+      $('gen-btn').textContent = 'Generate';
+      updateGenBtn();
+      openBtn.style.display = 'block';
+      logBox.textContent += '\n✓ Done!';
+      logBox.scrollTop = logBox.scrollHeight;
+    } else if (d.status === 'error') {
+      es.close(); busy = false;
+      $('gen-btn').textContent = 'Generate';
+      updateGenBtn();
+      logBox.textContent += '\n✗ Generation failed.';
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+  };
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+refreshFolders();
+</script>
+</body>
+</html>

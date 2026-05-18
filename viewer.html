@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PLY Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #eee; font-family: sans-serif; overflow: hidden; }
+  canvas { display: block; }
+
+  #lock-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(3px);
+    flex-direction: column; gap: 10px; cursor: pointer;
+  }
+  #lock-overlay h2 { font-size: 22px; color: #fff; }
+  #lock-overlay p  { font-size: 13px; color: #aaa; }
+  #lock-overlay.hidden { display: none; }
+
+  #crosshair {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+    width: 18px; height: 18px;
+    pointer-events: none; display: none;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.75); border-radius: 1px;
+  }
+  #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+  #crosshair::after  { height: 2px; width: 100%; top: 50%;  transform: translateY(-50%); }
+
+  #panel {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 220px; background: rgba(15,15,20,0.88);
+    backdrop-filter: blur(6px); padding: 16px 14px;
+    display: flex; flex-direction: column; gap: 14px;
+    border-left: 1px solid #2a2a3a; overflow-y: auto;
+  }
+  #panel h3 { font-size: 13px; color: #8cf; letter-spacing: 0.05em; text-transform: uppercase; }
+  .row { display: flex; flex-direction: column; gap: 4px; }
+  .row label { font-size: 12px; color: #aaa; display: flex; justify-content: space-between; }
+  .row label span { color: #fff; }
+  input[type=range] { width: 100%; accent-color: #58a; cursor: pointer; }
+  select {
+    width: 100%; background: #1a1a2a; border: 1px solid #444; color: #eee;
+    padding: 5px 8px; border-radius: 5px; font-size: 12px; cursor: pointer;
+  }
+  select:focus { outline: 1px solid #58a; }
+  button {
+    background: #222; border: 1px solid #444; color: #ccc;
+    padding: 6px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { background: #333; }
+  #file-input { display: none; }
+
+  #status {
+    position: absolute; top: 50%; left: calc(50% - 110px);
+    transform: translate(-50%,-50%);
+    font-size: 15px; color: #aaa; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="status">Loading…</div>
+
+<div id="lock-overlay">
+  <h2>Click to Explore</h2>
+  <p>WASD · move &nbsp;|&nbsp; Mouse · look &nbsp;|&nbsp; Space / C · up / down</p>
+  <p>Esc · release mouse &amp; access controls</p>
+</div>
+<div id="crosshair"></div>
+
+<div id="panel">
+  <h3>Model</h3>
+  <div class="row">
+    <label>Select</label>
+    <select id="model-select"><option value="">Scanning…</option></select>
+  </div>
+  <div class="row">
+    <label>Or open local file</label>
+    <button id="open-btn">Open PLY…</button>
+    <input type="file" id="file-input" accept=".ply">
+  </div>
+
+  <h3>Display</h3>
+  <div class="row">
+    <label>Point Size <span id="sz-val">3</span></label>
+    <input type="range" id="sz" min="0.1" max="20" step="0.1" value="3">
+  </div>
+
+  <h3>Orientation</h3>
+  <div class="row">
+    <label>Rotate X <span id="rx-val">0°</span></label>
+    <input type="range" id="rx" min="-180" max="180" step="1" value="0">
+  </div>
+  <div class="row">
+    <label>Rotate Y <span id="ry-val">0°</span></label>
+    <input type="range" id="ry" min="-180" max="180" step="1" value="0">
+  </div>
+  <div class="row">
+    <label>Rotate Z <span id="rz-val">0°</span></label>
+    <input type="range" id="rz" min="-180" max="180" step="1" value="0">
+  </div>
+  <button id="reset-rot">Reset Rotation</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+
+const status    = document.getElementById('status');
+const overlay   = document.getElementById('lock-overlay');
+const crosshair = document.getElementById('crosshair');
+const select    = document.getElementById('model-select');
+
+// ── Renderer ──────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth - 220, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = (innerWidth - 220) / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth - 220, innerHeight);
+});
+
+// ── Scene / Camera ────────────────────────────────────────────────────────────
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x111111);
+const camera = new THREE.PerspectiveCamera(75, (innerWidth - 220) / innerHeight, 0.001, 2000);
+
+// ── FPS Controls ──────────────────────────────────────────────────────────────
+const controls = new PointerLockControls(camera, renderer.domElement);
+
+let moveSpeed = 1.0;
+const keys = {};
+const SCROLL_KEYS = new Set(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']);
+document.addEventListener('keydown', e => {
+  if (!controls.isLocked) return;
+  keys[e.code] = true;
+  if (SCROLL_KEYS.has(e.code)) e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+overlay.addEventListener('click', () => controls.lock());
+controls.addEventListener('lock',   () => { overlay.classList.add('hidden');    crosshair.style.display = 'block'; });
+controls.addEventListener('unlock', () => {
+  overlay.classList.remove('hidden');
+  crosshair.style.display = 'none';
+  Object.keys(keys).forEach(k => keys[k] = false);
+});
+
+function applyMovement(dt) {
+  if (!controls.isLocked) return;
+  const speed = moveSpeed * dt * (keys['ShiftLeft'] || keys['ShiftRight'] ? 3 : 1);
+  if (keys['KeyW'] || keys['ArrowUp'])    controls.moveForward(speed);
+  if (keys['KeyS'] || keys['ArrowDown'])  controls.moveForward(-speed);
+  if (keys['KeyA'] || keys['ArrowLeft'])  controls.moveRight(-speed);
+  if (keys['KeyD'] || keys['ArrowRight']) controls.moveRight(speed);
+  if (keys['Space'])                      camera.position.y += speed;
+  if (keys['KeyC'])                       camera.position.y -= speed;
+}
+
+// ── Material ──────────────────────────────────────────────────────────────────
+function makeCircleTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff'; ctx.fill();
+  return new THREE.CanvasTexture(c);
+}
+const material = new THREE.PointsMaterial({
+  vertexColors: true, sizeAttenuation: true, size: 0.03,
+  map: makeCircleTex(), alphaTest: 0.5, transparent: true,
+});
+let cloud = null;
+
+// ── Load geometry ─────────────────────────────────────────────────────────────
+function loadGeometry(geometry) {
+  geometry.computeBoundingBox();
+  const box    = geometry.boundingBox;
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const size   = box.getSize(new THREE.Vector3()).length();
+  geometry.translate(-center.x, -center.y, -center.z);
+
+  if (cloud) scene.remove(cloud);
+  cloud = new THREE.Points(geometry, material);
+  scene.add(cloud);
+
+  material.size = size * parseFloat(document.getElementById('sz').value) * 0.0008;
+  moveSpeed = size * 0.6;
+  camera.position.set(0, 0, size * 0.8);
+  camera.near = size * 0.0005;
+  camera.far  = size * 20;
+  camera.updateProjectionMatrix();
+
+  // reset rotation sliders
+  ['rx','ry','rz'].forEach(id => {
+    document.getElementById(id).value = 0;
+    document.getElementById(id + '-val').textContent = '0°';
+  });
+  cloud.rotation.set(0, 0, 0);
+
+  status.style.display = 'none';
+}
+
+// ── Populate dropdown from server directory listing ───────────────────────────
+const PREFERRED = 'result_conf07_simplified.ply';
+const loader = new PLYLoader();
+
+async function populateDropdown() {
+  try {
+    const files = await fetch('models.json').then(r => r.json());
+    if (!files.length) throw new Error('empty');
+
+    files.sort((a, b) => {
+      if (a === PREFERRED) return -1;
+      if (b === PREFERRED) return  1;
+      return a.localeCompare(b);
+    });
+
+    select.innerHTML = files.map(f =>
+      `<option value="${f}"${f === PREFERRED ? ' selected' : ''}>${f}</option>`
+    ).join('');
+
+    loadFile(files.includes(PREFERRED) ? PREFERRED : files[0]);
+  } catch {
+    select.innerHTML = '<option value="">No PLY files found</option>';
+    status.textContent = 'No PLY files found — check models.json on server.';
+  }
+}
+
+function loadFile(filename) {
+  status.textContent = 'Loading…'; status.style.display = 'block';
+  loader.load(
+    filename,
+    geo => { status.textContent = 'Building scene…'; loadGeometry(geo); },
+    xhr => { if (xhr.total) status.textContent = `Loading… ${Math.round(xhr.loaded / xhr.total * 100)}%`; },
+    ()  => { status.textContent = `Failed to load ${filename}`; }
+  );
+}
+
+select.addEventListener('change', () => { if (select.value) loadFile(select.value); });
+
+populateDropdown();
+
+// ── Open local file ───────────────────────────────────────────────────────────
+document.getElementById('open-btn').addEventListener('click', () =>
+  document.getElementById('file-input').click());
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  status.textContent = 'Reading…'; status.style.display = 'block';
+  // add to dropdown if not already there
+  if (![...select.options].some(o => o.value === file.name)) {
+    const opt = new Option(file.name, file.name);
+    select.add(opt);
+  }
+  select.value = file.name;
+  const reader = new FileReader();
+  reader.onload = ev => { status.textContent = 'Parsing…'; loader.parse(ev.target.result, geo => loadGeometry(geo)); };
+  reader.readAsArrayBuffer(file);
+});
+
+// ── Sliders ───────────────────────────────────────────────────────────────────
+const D2R = Math.PI / 180;
+
+function bind(id, valId, apply) {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    document.getElementById(valId).textContent = id === 'sz' ? el.value : el.value + '°';
+    apply(parseFloat(el.value));
+  });
+}
+
+bind('sz', 'sz-val', v => {
+  if (!cloud) return;
+  const size = new THREE.Box3().setFromObject(cloud).getSize(new THREE.Vector3()).length();
+  material.size = size * v * 0.0008;
+});
+bind('rx', 'rx-val', v => { if (cloud) cloud.rotation.x = v * D2R; });
+bind('ry', 'ry-val', v => { if (cloud) cloud.rotation.y = v * D2R; });
+bind('rz', 'rz-val', v => { if (cloud) cloud.rotation.z = v * D2R; });
+
+document.getElementById('reset-rot').addEventListener('click', () => {
+  ['rx','ry','rz'].forEach(id => {
+    document.getElementById(id).value = 0;
+    document.getElementById(id + '-val').textContent = '0°';
+  });
+  if (cloud) cloud.rotation.set(0, 0, 0);
+});
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  applyMovement((now - last) / 1000);
+  last = now;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
