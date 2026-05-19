@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--data_path",       required=True)
     parser.add_argument("--save_path",       required=True)
     parser.add_argument("--interval",        type=int,   default=10)
+    parser.add_argument("--max_frames",      type=int,   default=0)   # 0 = no limit
     parser.add_argument("--conf_threshold",  type=float, default=0.10)
     parser.add_argument("--edge_rtol",       type=float, default=0.03)
     parser.add_argument("--voxel_size",      type=float, default=0.02)
@@ -50,6 +51,12 @@ def main():
     )
 
     n_frames = imgs.shape[1]
+    if args.max_frames > 0 and n_frames > args.max_frames:
+        step = n_frames / args.max_frames
+        keep = [round(i * step) for i in range(args.max_frames)]
+        imgs = imgs[:, keep]
+        n_frames = imgs.shape[1]
+        print(f"Subsampled to {n_frames} frames (max_frames={args.max_frames})")
     print(f"Frames loaded: {n_frames}")
     if n_frames == 0:
         print("ERROR: no frames could be loaded.", file=sys.stderr)

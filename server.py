@@ -152,6 +152,7 @@ def generate():
         return jsonify({"error": "No images or video found in set"}), 400
 
     interval    = max(1, int(data.get("interval",      10)))
+    max_frames  = max(0, int(data.get("max_frames",     0)))
     conf        = float(data.get("conf_threshold",  0.10))
     edge_rtol   = float(data.get("edge_rtol",       0.03))
     voxel_size  = float(data.get("voxel_size",      0.02))
@@ -170,6 +171,7 @@ def generate():
             "--data_path",      data_path,
             "--save_path",      out_path,
             "--interval",       str(interval),
+            "--max_frames",     str(max_frames),
             "--conf_threshold", str(conf),
             "--edge_rtol",      str(edge_rtol),
             "--voxel_size",     str(voxel_size),
