@@ -94,7 +94,8 @@ main { display: flex; flex: 1; overflow: hidden; }
 #upload-msg { font-size: 11px; color: #6ab; text-align: center; padding: 4px 0; min-height: 18px; flex-shrink: 0; }
 
 /* ── Right panel ── */
-#right { flex: 1; overflow-y: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 18px; }
+#right { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px; }
+#right > * + * { margin-top: 18px; }
 
 .section {
   border: 1px solid #1a1a28; border-radius: 8px; overflow: hidden;
