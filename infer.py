@@ -4,6 +4,11 @@ import argparse
 import os
 import sys
 
+# Reduce allocator fragmentation — large N causes many repeated alloc/free cycles
+# that leave the pool fragmented. expandable_segments lets CUDA grow the pool in
+# place instead of reserving a fixed slab that fragments.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import numpy as np
 import torch
 from plyfile import PlyData, PlyElement
@@ -62,11 +67,33 @@ def main():
         print("ERROR: no frames could be loaded.", file=sys.stderr)
         sys.exit(1)
 
+    torch.cuda.empty_cache()
     print("Loading model…")
     model = Pi3X.from_pretrained("yyfz233/Pi3X").eval().to(device)
     model.disable_multimodal()
 
+    # Chunk the DINOv2 encoder so peak VRAM is chunk_size frames, not all N.
+    # model.encode() calls self.encoder(imgs_flat, is_training=True) once; we
+    # patch encode() to do that call in slices then hand the full hidden back.
+    import types
+
+    def _encode_chunked(self, imgs_5d, **kw):
+        B, N, C, H, W = imgs_5d.shape
+        imgs_flat = imgs_5d.reshape(B * N, C, H, W)
+        chunk = 32
+        parts = []
+        for i in range(0, B * N, chunk):
+            h = self.encoder(imgs_flat[i:i + chunk], is_training=True)["x_norm_patchtokens"]
+            parts.append(h)
+            torch.cuda.empty_cache()
+        hidden = torch.cat(parts, dim=0)
+        # multimodal is disabled; encode() would just return hidden + Nones
+        return hidden, None, None, None, None
+
+    model.encode = types.MethodType(_encode_chunked, model)
+
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    torch.cuda.empty_cache()
     print("Running inference…")
     with torch.no_grad(), torch.amp.autocast("cuda", dtype=dtype):
         res = model(imgs=imgs)
