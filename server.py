@@ -9,10 +9,11 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, redirect, request, send_file, send_from_directory
 
-ROOT        = Path(__file__).parent.resolve()
-EXAMPLES    = ROOT / "examples"
-SPLATS      = ROOT / "splats"
-UPLOADS     = ROOT / "uploads"
+ROOT         = Path(__file__).parent.resolve()
+EXAMPLES     = ROOT / "examples"
+SPLATS       = ROOT / "splats"
+UPLOADS      = ROOT / "uploads"
+APEX_DATASETS = ROOT / "ApexRuns" / "datasets"
 UPLOADS.mkdir(exist_ok=True)
 SPLATS.mkdir(exist_ok=True)
 
@@ -64,6 +65,22 @@ def models_json():
 @app.route("/examples/<path:filename>")
 def serve_example(filename):
     return send_from_directory(EXAMPLES, filename)
+
+
+# ── Apex Runs ─────────────────────────────────────────────────────────────────
+
+@app.route("/apex-runs/list")
+def list_apex_runs():
+    names = sorted(
+        d.name for d in APEX_DATASETS.iterdir()
+        if d.is_dir() and (d / "pointcloud.ply").exists()
+    )
+    return jsonify(names)
+
+@app.route("/apex-runs/<name>/pointcloud.ply")
+def serve_apex_ply(name):
+    safe_name = re.sub(r"[^\w.\-+]", "_", name)
+    return send_from_directory(APEX_DATASETS / safe_name, "pointcloud.ply")
 
 
 # ── Folders ───────────────────────────────────────────────────────────────────

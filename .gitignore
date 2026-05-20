@@ -11,6 +11,7 @@ examples/models.json
 uploads/
 splats/
 ApexImg/
+ApexRuns/
 
 # ── Pi3 bundled example media (large) ─────────────────────────────────────────
 examples/*.mp4

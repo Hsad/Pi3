@@ -77,6 +77,13 @@
 
   <h3>Model</h3>
   <div class="row">
+    <label>Collection</label>
+    <select id="collection-select">
+      <option value="examples">Examples</option>
+      <option value="apex">Apex Runs</option>
+    </select>
+  </div>
+  <div class="row">
     <label>Select</label>
     <select id="model-select"><option value="">Scanning…</option></select>
   </div>
@@ -240,48 +247,67 @@ function loadGeometry(geometry) {
   status.style.display = 'none';
 }
 
-// ── Populate dropdown from server directory listing ───────────────────────────
-const FALLBACK  = 'result_conf07_simplified.ply';
-const loader    = new PLYLoader();
+// ── Collection + model dropdown ───────────────────────────────────────────────
+const FALLBACK         = 'result_conf07_simplified.ply';
+const loader           = new PLYLoader();
+const collectionSelect = document.getElementById('collection-select');
+
+function plyUrl(collection, name) {
+  return collection === 'apex'
+    ? `/apex-runs/${encodeURIComponent(name)}/pointcloud.ply`
+    : name;  // examples: relative, resolves under /examples/
+}
 
 async function populateDropdown() {
+  const collection = collectionSelect.value;
   try {
-    const files = await fetch('models.json').then(r => r.json());
-    if (!files.length) throw new Error('empty');
+    let names;
+    if (collection === 'apex') {
+      names = await fetch('/apex-runs/list').then(r => r.json());
+    } else {
+      names = await fetch('models.json').then(r => r.json());
+    }
+    if (!names.length) throw new Error('empty');
 
-    // ?model=filename.ply in the URL selects a specific cloud on load
+    // ?model= URL param selects a specific entry on load (examples only)
     const urlParam  = new URLSearchParams(location.search).get('model');
-    const preferred = (urlParam && files.includes(urlParam)) ? urlParam : FALLBACK;
+    const preferred = (collection === 'examples' && urlParam && names.includes(urlParam))
+      ? urlParam : (collection === 'examples' && names.includes(FALLBACK) ? FALLBACK : null);
 
-    files.sort((a, b) => {
+    names.sort((a, b) => {
       if (a === preferred) return -1;
       if (b === preferred) return  1;
       return a.localeCompare(b);
     });
 
-    select.innerHTML = files.map(f =>
-      `<option value="${f}"${f === preferred ? ' selected' : ''}>${f}</option>`
+    select.innerHTML = names.map(n =>
+      `<option value="${n}"${n === preferred ? ' selected' : ''}>${n}</option>`
     ).join('');
 
-    loadFile(files.includes(preferred) ? preferred : files[0]);
+    loadFile(collection, preferred || names[0]);
   } catch {
     select.innerHTML = '<option value="">No PLY files found</option>';
-    status.textContent = 'No PLY files found — check models.json on server.';
+    status.textContent = 'No PLY files found.';
   }
 }
 
-function loadFile(filename) {
-  history.replaceState(null, '', '?model=' + encodeURIComponent(filename));
+function loadFile(collection, name) {
+  if (collection === 'examples')
+    history.replaceState(null, '', '?model=' + encodeURIComponent(name));
+  const url = plyUrl(collection, name);
   status.textContent = 'Loading…'; status.style.display = 'block';
   loader.load(
-    filename,
+    url,
     geo => { status.textContent = 'Building scene…'; loadGeometry(geo); },
     xhr => { if (xhr.total) status.textContent = `Loading… ${Math.round(xhr.loaded / xhr.total * 100)}%`; },
-    ()  => { status.textContent = `Failed to load ${filename}`; }
+    ()  => { status.textContent = `Failed to load ${url}`; }
   );
 }
 
-select.addEventListener('change', () => { if (select.value) loadFile(select.value); });
+collectionSelect.addEventListener('change', populateDropdown);
+select.addEventListener('change', () => {
+  if (select.value) loadFile(collectionSelect.value, select.value);
+});
 
 document.getElementById('copy-link-btn').addEventListener('click', () => {
   navigator.clipboard.writeText(location.href).then(() => {
