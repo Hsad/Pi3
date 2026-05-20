@@ -1,5 +1,6 @@
 # ── Virtual environment ────────────────────────────────────────────────────────
 .venv/
+venv/
 
 # ── Generated point clouds ────────────────────────────────────────────────────
 *.ply
@@ -8,6 +9,8 @@ examples/models.json
 
 # ── User upload sets ──────────────────────────────────────────────────────────
 uploads/
+splats/
+ApexImg/
 
 # ── Pi3 bundled example media (large) ─────────────────────────────────────────
 examples/*.mp4

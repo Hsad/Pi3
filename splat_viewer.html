@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Splat Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; color: #eee; font-family: sans-serif; overflow: hidden; }
+  canvas { display: block; }
+
+  #lock-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(3px);
+    flex-direction: column; gap: 10px; cursor: pointer; z-index: 5;
+  }
+  #lock-overlay h2 { font-size: 22px; color: #fff; }
+  #lock-overlay p  { font-size: 13px; color: #aaa; }
+  #lock-overlay.hidden { display: none; }
+
+  #crosshair {
+    position: absolute; top: 50%; left: calc(50% - 110px);
+    transform: translate(-50%,-50%);
+    width: 18px; height: 18px;
+    pointer-events: none; display: none; z-index: 6;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.75); border-radius: 1px;
+  }
+  #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+  #crosshair::after  { height: 2px; width: 100%; top: 50%;  transform: translateY(-50%); }
+
+  #panel {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 220px; background: rgba(15,15,20,0.88);
+    backdrop-filter: blur(6px); padding: 16px 14px;
+    display: flex; flex-direction: column; gap: 14px;
+    border-left: 1px solid #2a2a3a; overflow-y: auto; z-index: 10;
+  }
+  #panel h3 { font-size: 13px; color: #8cf; letter-spacing: 0.05em; text-transform: uppercase; }
+  .row { display: flex; flex-direction: column; gap: 4px; }
+  .row label { font-size: 12px; color: #aaa; display: flex; justify-content: space-between; }
+  .row label span { color: #fff; }
+  input[type=range] { width: 100%; accent-color: #58a; cursor: pointer; }
+  select {
+    width: 100%; background: #1a1a2a; border: 1px solid #444; color: #eee;
+    padding: 5px 8px; border-radius: 5px; font-size: 12px; cursor: pointer;
+  }
+  select:focus { outline: 1px solid #58a; }
+  button {
+    background: #222; border: 1px solid #444; color: #ccc;
+    padding: 6px 10px; border-radius: 5px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { background: #333; }
+  #file-input { display: none; }
+
+  #status {
+    position: absolute; top: 50%; left: calc(50% - 110px);
+    transform: translate(-50%,-50%);
+    font-size: 15px; color: #aaa; pointer-events: none; z-index: 5;
+  }
+</style>
+</head>
+<body>
+
+<div id="status">Loading…</div>
+
+<div id="lock-overlay">
+  <h2>Click to Explore</h2>
+  <p>WASD · move &nbsp;|&nbsp; Mouse · look &nbsp;|&nbsp; Space / C · up / down</p>
+  <p>Middle drag · rotate scene &nbsp;|&nbsp; Esc · release mouse</p>
+</div>
+<div id="crosshair"></div>
+
+<div id="panel">
+  <a href="/upload" style="display:block;text-align:center;padding:7px;background:#1b2e48;border:1px solid #385878;color:#7ab;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;letter-spacing:0.02em;">Upload &amp; Generate ↗</a>
+
+  <h3>Model</h3>
+  <div class="row">
+    <label>Select</label>
+    <select id="model-select"><option value="">Scanning…</option></select>
+  </div>
+  <div class="row">
+    <button id="copy-link-btn" style="width:100%">⎘ Copy shareable link</button>
+  </div>
+  <div class="row">
+    <label>Or open local file</label>
+    <button id="open-btn">Open .ply…</button>
+    <input type="file" id="file-input" accept=".ply,.splat">
+  </div>
+
+  <h3>Orientation</h3>
+  <div class="row">
+    <label>Rotate X <span id="rx-val">0°</span></label>
+    <input type="range" id="rx" min="-180" max="180" step="1" value="0">
+  </div>
+  <div class="row">
+    <label>Rotate Y <span id="ry-val">0°</span></label>
+    <input type="range" id="ry" min="-180" max="180" step="1" value="0">
+  </div>
+  <div class="row">
+    <label>Rotate Z <span id="rz-val">0°</span></label>
+    <input type="range" id="rz" min="-180" max="180" step="1" value="0">
+  </div>
+  <button id="reset-rot">Reset Rotation</button>
+
+  <h3>Render</h3>
+  <div class="row">
+    <label>Camera Up</label>
+    <select id="up-select">
+      <option value="0,1,0">Y up (OpenGL)</option>
+      <option value="0,-1,0">Y down (OpenCV)</option>
+      <option value="0,0,1">Z up</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Alpha cutoff <span id="alpha-val">5</span></label>
+    <input type="range" id="alpha-range" min="0" max="50" step="1" value="5">
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js';
+
+const status    = document.getElementById('status');
+const overlay   = document.getElementById('lock-overlay');
+const crosshair = document.getElementById('crosshair');
+const select    = document.getElementById('model-select');
+const panel     = document.getElementById('panel');
+
+const PREFERRED = new URLSearchParams(location.search).get('model') || '';
+
+// ── Viewer / control state ────────────────────────────────────────────────────
+let viewer   = null;
+let controls = null;
+let moveAnim = null;
+let evtAc    = null;
+
+let moveSpeed = 1.5;
+const keys = {};
+const SCROLL_KEYS = new Set(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight']);
+
+// ── Movement ──────────────────────────────────────────────────────────────────
+function applyMovement(dt) {
+  if (!controls || !controls.isLocked) return;
+  const speed = moveSpeed * dt * (keys['ShiftLeft'] || keys['ShiftRight'] ? 3 : 1);
+  if (keys['KeyW'] || keys['ArrowUp'])    controls.moveForward(speed);
+  if (keys['KeyS'] || keys['ArrowDown'])  controls.moveForward(-speed);
+  if (keys['KeyA'] || keys['ArrowLeft'])  controls.moveRight(-speed);
+  if (keys['KeyD'] || keys['ArrowRight']) controls.moveRight(speed);
+  if (keys['Space'])                      viewer.camera.position.y += speed * 0.2;
+  if (keys['KeyC'])                       viewer.camera.position.y -= speed * 0.2;
+}
+
+// ── Build / teardown ──────────────────────────────────────────────────────────
+function buildViewer() {
+  if (controls) { controls.dispose(); controls = null; }
+  if (moveAnim) { cancelAnimationFrame(moveAnim); moveAnim = null; }
+  if (evtAc)    { evtAc.abort(); evtAc = null; }
+  if (viewer)   { viewer.dispose(); viewer = null; }
+  Object.keys(keys).forEach(k => delete keys[k]);
+  mmDragging = false;
+  overlay.classList.remove('hidden');
+  crosshair.style.display = 'none';
+
+  const up = document.getElementById('up-select').value.split(',').map(Number);
+  viewer = new GaussianSplats3D.Viewer({
+    cameraUp: up,
+    initialCameraPosition: [0, 0, 3],
+    initialCameraLookAt:   [0, 0, 0],
+    selfDrivenMode: false,   // we drive the loop so GS3D never resets camera.up
+    useBuiltInControls: false,
+    renderMode: GaussianSplats3D.RenderMode.Always,
+    sharedMemoryForWorkers: false,
+  });
+}
+
+function setupControls() {
+  evtAc = new AbortController();
+  const sig = { signal: evtAc.signal };
+
+  viewer.camera.up.set(0, 1, 0);
+  controls = new PointerLockControls(viewer.camera, document.body);
+
+  overlay.addEventListener('click', () => controls.lock(), sig);
+  controls.addEventListener('lock', () => {
+    overlay.classList.add('hidden');
+    crosshair.style.display = 'block';
+  });
+  controls.addEventListener('unlock', () => {
+    overlay.classList.remove('hidden');
+    crosshair.style.display = 'none';
+    Object.keys(keys).forEach(k => keys[k] = false);
+  });
+
+  document.addEventListener('keydown', e => {
+    if (!controls.isLocked) return;
+    keys[e.code] = true;
+    if (SCROLL_KEYS.has(e.code)) e.preventDefault();
+  }, sig);
+  document.addEventListener('keyup', e => { keys[e.code] = false; }, sig);
+
+  let last = performance.now();
+  function tick() {
+    moveAnim = requestAnimationFrame(tick);
+    const now = performance.now();
+    viewer.camera.up.set(0, 1, 0); // own loop, but enforce each frame to be safe
+    applyMovement((now - last) / 1000);
+    last = now;
+    viewer.update();
+    viewer.render();
+  }
+  tick();
+}
+
+// ── Load scene ────────────────────────────────────────────────────────────────
+async function loadScene(url) {
+  if (url.startsWith('/splats/'))
+    history.replaceState(null, '', '?model=' + encodeURIComponent(url.slice(8)));
+  status.textContent = 'Loading…'; status.style.display = 'block';
+  buildViewer();
+  setupControls(); // start update/render loop before loading so progressive data is processed
+  try {
+    await viewer.addSplatScene(url, {
+      splatAlphaRemovalThreshold: parseInt(document.getElementById('alpha-range').value),
+      showLoadingUI: false,
+      progressiveLoad: true,
+    });
+    applyRotation();
+    status.style.display = 'none';
+  } catch (e) {
+    status.textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+// ── Rotation ──────────────────────────────────────────────────────────────────
+const D2R = Math.PI / 180;
+const R2D = 180 / Math.PI;
+
+function applyRotation() {
+  if (!viewer?.splatMesh) return;
+  viewer.splatMesh.rotation.set(
+    parseFloat(document.getElementById('rx').value) * D2R,
+    parseFloat(document.getElementById('ry').value) * D2R,
+    parseFloat(document.getElementById('rz').value) * D2R
+  );
+}
+
+function syncRotSliders() {
+  if (!viewer?.splatMesh) return;
+  const clamp = v => Math.max(-180, Math.min(180, Math.round(v)));
+  ['x','y','z'].forEach(ax => {
+    const deg = clamp(viewer.splatMesh.rotation[ax] * R2D);
+    document.getElementById('r' + ax).value = deg;
+    document.getElementById('r' + ax + '-val').textContent = deg + '°';
+  });
+}
+
+['rx','ry','rz'].forEach(id => {
+  document.getElementById(id).addEventListener('input', e => {
+    document.getElementById(id + '-val').textContent = e.target.value + '°';
+    applyRotation();
+  });
+});
+
+document.getElementById('reset-rot').addEventListener('click', () => {
+  ['rx','ry','rz'].forEach(id => {
+    document.getElementById(id).value = 0;
+    document.getElementById(id + '-val').textContent = '0°';
+  });
+  applyRotation();
+});
+
+// ── Middle-mouse scene rotation ───────────────────────────────────────────────
+const MM_SENS = 0.4;
+let mmDragging = false;
+let mmLast = { x: 0, y: 0 };
+
+document.addEventListener('mousedown', e => {
+  if (e.button !== 1) return;
+  e.preventDefault();
+  mmDragging = true;
+  mmLast = { x: e.clientX, y: e.clientY };
+});
+
+document.addEventListener('mousemove', e => {
+  if (!mmDragging || !viewer?.splatMesh) return;
+  const dx = controls?.isLocked ? e.movementX : e.clientX - mmLast.x;
+  const dy = controls?.isLocked ? e.movementY : e.clientY - mmLast.y;
+  mmLast = { x: e.clientX, y: e.clientY };
+  viewer.splatMesh.rotation.y += dx * MM_SENS * D2R;
+  viewer.splatMesh.rotation.x += dy * MM_SENS * D2R;
+  syncRotSliders();
+  if (controls?.isLocked) e.stopImmediatePropagation();
+}, true);
+
+document.addEventListener('mouseup', e => {
+  if (e.button === 1) mmDragging = false;
+});
+
+// ── Camera up & alpha ─────────────────────────────────────────────────────────
+document.getElementById('up-select').addEventListener('change', () => {
+  if (select.value) loadScene('/splats/' + select.value);
+});
+
+document.getElementById('alpha-range').addEventListener('input', e => {
+  document.getElementById('alpha-val').textContent = e.target.value;
+});
+document.getElementById('alpha-range').addEventListener('change', () => {
+  if (select.value) loadScene('/splats/' + select.value);
+});
+
+// ── Dropdown ──────────────────────────────────────────────────────────────────
+async function populateDropdown() {
+  try {
+    const files = await fetch('/splats/list').then(r => r.json());
+    if (!files.length) throw new Error('empty');
+    files.sort((a, b) => {
+      if (a === PREFERRED) return -1;
+      if (b === PREFERRED) return  1;
+      return b.localeCompare(a);
+    });
+    select.innerHTML = files.map(f =>
+      `<option value="${f}"${f === PREFERRED ? ' selected' : ''}>${f}</option>`
+    ).join('');
+    loadScene('/splats/' + (files.includes(PREFERRED) ? PREFERRED : files[0]));
+  } catch {
+    select.innerHTML = '<option value="">No splat files found</option>';
+    status.textContent = 'No .ply splat files found on server.';
+  }
+}
+
+select.addEventListener('change', () => { if (select.value) loadScene('/splats/' + select.value); });
+
+document.getElementById('copy-link-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(location.href).then(() => {
+    const btn = document.getElementById('copy-link-btn');
+    const prev = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = prev; }, 1800);
+  });
+});
+
+// ── Open local file ───────────────────────────────────────────────────────────
+document.getElementById('open-btn').addEventListener('click', () =>
+  document.getElementById('file-input').click());
+
+document.getElementById('file-input').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  if (![...select.options].some(o => o.value === file.name))
+    select.add(new Option(file.name, file.name));
+  select.value = file.name;
+  status.textContent = 'Loading…'; status.style.display = 'block';
+  buildViewer();
+  setupControls();
+  try {
+    await viewer.addSplatScene(url, {
+      splatAlphaRemovalThreshold: parseInt(document.getElementById('alpha-range').value),
+      showLoadingUI: false,
+    });
+    applyRotation();
+    status.style.display = 'none';
+  } catch (err) { status.textContent = 'Failed: ' + err.message; }
+});
+
+populateDropdown();
+</script>
+</body>
+</html>

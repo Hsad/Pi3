@@ -25,6 +25,8 @@ if __name__ == '__main__':
                         help="Path to the model checkpoint file. Default: None")
     parser.add_argument("--device", type=str, default='cuda',
                         help="Device to run inference on ('cuda' or 'cpu'). Default: 'cuda'")
+    parser.add_argument("--conf", type=float, default=0.1,
+                        help="Confidence threshold (0-1). Higher = stricter, removes uncertain/moving objects. Default: 0.1")
                         
     args = parser.parse_args()
     if args.interval < 0:
@@ -122,7 +124,7 @@ if __name__ == '__main__':
         print(f"Original frist frame intrinsic: \n{conditions['intrinsics'][0, 0].cpu().numpy()}")
 
     # 4. process mask
-    masks = torch.sigmoid(res['conf'][..., 0]) > 0.1
+    masks = torch.sigmoid(res['conf'][..., 0]) > args.conf
     non_edge = ~depth_normal_edge(res['local_points'], rtol=0.03, mask=masks)
     masks = torch.logical_and(masks, non_edge)[0]
 

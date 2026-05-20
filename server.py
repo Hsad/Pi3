@@ -11,11 +11,19 @@ from flask import Flask, Response, jsonify, redirect, request, send_file, send_f
 
 ROOT        = Path(__file__).parent.resolve()
 EXAMPLES    = ROOT / "examples"
+SPLATS      = ROOT / "splats"
 UPLOADS     = ROOT / "uploads"
 UPLOADS.mkdir(exist_ok=True)
+SPLATS.mkdir(exist_ok=True)
 
 app  = Flask(__name__)
 jobs: dict[str, dict] = {}
+
+@app.after_request
+def add_coi_headers(response):
+    response.headers["Cross-Origin-Opener-Policy"]   = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    return response
 _lock = threading.Lock()
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv"}
@@ -35,6 +43,18 @@ def root():
 @app.route("/upload")
 def upload_page():
     return send_file(ROOT / "upload.html")
+
+@app.route("/splats")
+def splat_viewer():
+    return send_file(ROOT / "splat_viewer.html")
+
+@app.route("/splats/list")
+def list_splats():
+    return jsonify(sorted(f.name for f in SPLATS.glob("*.ply")))
+
+@app.route("/splats/<path:filename>")
+def serve_splat(filename):
+    return send_from_directory(SPLATS, filename)
 
 @app.route("/examples/models.json")
 def models_json():
@@ -165,7 +185,7 @@ def generate():
         jobs[job_id] = {"status": "running", "log": [], "output": out_name}
 
     def run():
-        python = str(ROOT / ".venv/bin/python")
+        python = str(ROOT / "venv/bin/python")
         cmd = [
             python, str(ROOT / "infer.py"),
             "--data_path",      data_path,
@@ -176,6 +196,67 @@ def generate():
             "--edge_rtol",      str(edge_rtol),
             "--voxel_size",     str(voxel_size),
             "--pixel_limit",    str(pixel_limit),
+        ]
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            for line in proc.stdout:
+                with _lock:
+                    jobs[job_id]["log"].append(line.rstrip())
+            proc.wait()
+            status = "done" if proc.returncode == 0 else "error"
+        except Exception as exc:
+            with _lock:
+                jobs[job_id]["log"].append(str(exc))
+            status = "error"
+        with _lock:
+            jobs[job_id]["status"] = status
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/generate_splat", methods=["POST"])
+def generate_splat():
+    data        = request.json or {}
+    folder_name = safe(data.get("folder", ""))
+    if not folder_name:
+        return jsonify({"error": "No folder"}), 400
+    folder = UPLOADS / folder_name
+    if not folder.exists():
+        return jsonify({"error": "Folder not found"}), 404
+
+    IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+    images = [f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTS]
+    videos = [f for f in folder.iterdir() if f.suffix.lower() in VIDEO_EXTS]
+
+    if images:
+        data_path = str(folder)
+    elif videos:
+        data_path = str(videos[0])
+    else:
+        return jsonify({"error": "No images or video found in set"}), 400
+
+    interval   = max(1, int(data.get("interval",    10)))
+    conf       = float(data.get("conf_threshold", 0.10))
+    iterations = int(data.get("iterations",       7000))
+    out_name   = safe(data.get("output_name", folder_name)) + ".ply"
+    out_path   = str(SPLATS / out_name)
+
+    job_id = uuid.uuid4().hex[:8]
+    with _lock:
+        jobs[job_id] = {"status": "running", "log": [], "output": out_name, "type": "splat"}
+
+    def run():
+        python = str(ROOT / "venv/bin/python")
+        cmd = [
+            python, str(ROOT / "train_splat.py"),
+            "--data_path",  data_path,
+            "--save_path",  out_path,
+            "--interval",   str(interval),
+            "--conf",       str(conf),
+            "--iterations", str(iterations),
         ]
         try:
             proc = subprocess.Popen(

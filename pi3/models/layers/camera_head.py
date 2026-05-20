@@ -83,8 +83,14 @@ class CameraHead(nn.Module):
         if m.dim() < 3:
             m = m.reshape((-1, 3, 3))
         m_transpose = torch.transpose(torch.nn.functional.normalize(m, p=2, dim=-1), dim0=-1, dim1=-2)
-        u, s, v = torch.svd(m_transpose)
-        det = torch.det(torch.matmul(v, u.transpose(-2, -1)))
+        # torch.svd and torch.det JIT-compile kernels that fail on Blackwell (sm_121);
+        # run SVD on CPU and use a manual 3x3 determinant instead.
+        u, s, v = torch.svd(m_transpose.cpu())
+        u, v = u.to(m.device), v.to(m.device)
+        vut = torch.matmul(v, u.transpose(-2, -1))
+        det = (vut[:, 0, 0] * (vut[:, 1, 1] * vut[:, 2, 2] - vut[:, 1, 2] * vut[:, 2, 1])
+             - vut[:, 0, 1] * (vut[:, 1, 0] * vut[:, 2, 2] - vut[:, 1, 2] * vut[:, 2, 0])
+             + vut[:, 0, 2] * (vut[:, 1, 0] * vut[:, 2, 1] - vut[:, 1, 1] * vut[:, 2, 0]))
         # Check orientation reflection.
         r = torch.matmul(
             torch.cat([v[:, :, :-1], v[:, :, -1:] * det.view(-1, 1, 1)], dim=2),
