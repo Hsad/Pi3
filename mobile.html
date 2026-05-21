@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0c0c14">
+<title>Splat Viewer — Mobile</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; width: 100%; overflow: hidden; overscroll-behavior: none; touch-action: none; }
+  body {
+    background: #0c0c14; color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  canvas { display: block; touch-action: none; }
+
+  /* ── Top bar ── */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
+    display: flex; align-items: center; gap: 8px;
+    background: linear-gradient(to bottom, rgba(12,12,20,0.85), rgba(12,12,20,0));
+    pointer-events: none; z-index: 10;
+  }
+  #topbar > * { pointer-events: auto; }
+  #model-select {
+    flex: 1; min-width: 0;
+    background: rgba(20,20,32,0.85); color: #eee;
+    border: 1px solid #2a2a3a; border-radius: 8px;
+    padding: 10px 12px; font-size: 14px;
+    appearance: none; -webkit-appearance: none;
+    backdrop-filter: blur(8px);
+  }
+  .icon-btn {
+    width: 42px; height: 42px; flex-shrink: 0;
+    background: rgba(20,20,32,0.85); border: 1px solid #2a2a3a;
+    border-radius: 8px; color: #cde; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; backdrop-filter: blur(8px);
+  }
+  .icon-btn:active { background: rgba(40,55,80,0.9); }
+
+  /* ── Status / hint overlays ── */
+  #status {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 15px; color: #aab; padding: 14px 18px;
+    background: rgba(20,20,32,0.85); border-radius: 10px;
+    backdrop-filter: blur(8px); z-index: 8;
+  }
+  #status.hidden { display: none; }
+
+  #mode-pill {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    top: calc(env(safe-area-inset-top) + 64px);
+    padding: 6px 12px; font-size: 12px; font-weight: 600;
+    background: rgba(70,120,170,0.85); color: #fff;
+    border-radius: 14px; backdrop-filter: blur(8px);
+    opacity: 0; transition: opacity 0.25s; z-index: 9; pointer-events: none;
+    letter-spacing: 0.03em;
+  }
+  #mode-pill.show { opacity: 1; }
+
+  /* ── Bottom controls ── */
+  #bottom {
+    position: fixed; left: 0; right: 0;
+    bottom: 0;
+    padding: 10px 12px calc(env(safe-area-inset-bottom) + 12px);
+    background: linear-gradient(to top, rgba(12,12,20,0.92), rgba(12,12,20,0));
+    z-index: 10;
+  }
+  #btn-row {
+    display: flex; gap: 8px; justify-content: center;
+  }
+  .ctl-btn {
+    flex: 1; max-width: 130px;
+    padding: 12px 8px; font-size: 13px; font-weight: 600;
+    background: rgba(20,20,32,0.88); color: #cde;
+    border: 1px solid #2a2a3a; border-radius: 10px;
+    cursor: pointer; backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .ctl-btn:active { background: rgba(40,55,80,0.92); }
+  .ctl-btn.active {
+    background: rgba(70,120,170,0.85); border-color: #5a8ec0; color: #fff;
+  }
+  .ctl-btn .ico { font-size: 16px; }
+
+  /* ── Sheet (settings) ── */
+  #sheet-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    z-index: 20; backdrop-filter: blur(2px);
+  }
+  #sheet-bg.open { opacity: 1; pointer-events: auto; }
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: #14141e; color: #eee;
+    border-top-left-radius: 16px; border-top-right-radius: 16px;
+    padding: 8px 16px calc(env(safe-area-inset-bottom) + 18px);
+    transform: translateY(100%); transition: transform 0.25s ease;
+    z-index: 21; border-top: 1px solid #2a2a3a;
+  }
+  #sheet.open { transform: translateY(0); }
+  #sheet-handle {
+    width: 40px; height: 4px; background: #444; border-radius: 2px;
+    margin: 8px auto 14px;
+  }
+  #sheet h3 {
+    font-size: 11px; color: #8af; letter-spacing: 0.08em; text-transform: uppercase;
+    margin: 14px 0 8px;
+  }
+  #sheet h3:first-of-type { margin-top: 0; }
+  .sheet-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .sheet-row label {
+    display: flex; justify-content: space-between; font-size: 13px; color: #aab;
+  }
+  .sheet-row label span { color: #fff; font-variant-numeric: tabular-nums; }
+  .sheet-row input[type=range] {
+    width: 100%; height: 32px; accent-color: #58a;
+  }
+  .sheet-row select {
+    width: 100%; background: #1a1a2a; color: #eee;
+    border: 1px solid #333; border-radius: 8px;
+    padding: 10px 12px; font-size: 14px; appearance: none; -webkit-appearance: none;
+  }
+  .link-btn {
+    display: block; text-align: center;
+    padding: 12px; margin-top: 10px;
+    background: #1b2e48; color: #7ab;
+    border: 1px solid #385878; border-radius: 8px;
+    text-decoration: none; font-size: 14px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div id="status">Loading…</div>
+<div id="mode-pill">Orbit Mode</div>
+
+<div id="topbar">
+  <select id="model-select"><option value="">Scanning…</option></select>
+  <div id="settings-btn" class="icon-btn">⚙</div>
+</div>
+
+<div id="bottom">
+  <div id="btn-row">
+    <button id="lock-btn" class="ctl-btn"><span class="ico">🔒</span><span>Rotate Model</span></button>
+    <button id="reset-btn" class="ctl-btn"><span class="ico">⟲</span><span>Reset</span></button>
+    <button id="axes-btn" class="ctl-btn"><span class="ico">📐</span><span>Axes</span></button>
+  </div>
+</div>
+
+<div id="sheet-bg"></div>
+<div id="sheet">
+  <div id="sheet-handle"></div>
+
+  <h3>Render</h3>
+  <div class="sheet-row">
+    <label>Camera Up</label>
+    <select id="up-select">
+      <option value="0,1,0">Y up (OpenGL)</option>
+      <option value="0,-1,0">Y down (OpenCV)</option>
+      <option value="0,0,1">Z up</option>
+    </select>
+  </div>
+  <div class="sheet-row">
+    <label>Alpha Cutoff <span id="alpha-val">5</span></label>
+    <input type="range" id="alpha-range" min="0" max="50" step="1" value="5">
+  </div>
+  <div class="sheet-row">
+    <label>Dot Size <span id="size-val">1.00×</span></label>
+    <input type="range" id="size-range" min="0.1" max="3" step="0.05" value="1">
+  </div>
+
+  <h3>Share</h3>
+  <a id="copy-link-btn" class="link-btn" href="#">⎘ Copy shareable link</a>
+  <a href="/upload" class="link-btn">Upload &amp; Generate ↗</a>
+  <a href="/" class="link-btn">Desktop Viewer ↗</a>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js';
+
+const $ = id => document.getElementById(id);
+const status   = $('status');
+const select   = $('model-select');
+const modePill = $('mode-pill');
+
+const PREFERRED = new URLSearchParams(location.search).get('model') || '';
+const D2R = Math.PI / 180;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let viewer    = null;
+let controls  = null;
+let helpers   = null;     // group: grid + axes
+let rafId     = null;
+let lockMode  = false;    // false = orbit camera, true = rotate model
+let axesOn    = false;
+
+// touch drag for rotate-model mode
+const drag = { active: false, lastX: 0, lastY: 0, pointers: new Map() };
+
+// ── Build / teardown ──────────────────────────────────────────────────────────
+function buildViewer() {
+  if (controls) { controls.dispose(); controls = null; }
+  if (rafId)    { cancelAnimationFrame(rafId); rafId = null; }
+  if (viewer)   { viewer.dispose(); viewer = null; }
+  helpers = null;
+
+  const up = $('up-select').value.split(',').map(Number);
+  viewer = new GaussianSplats3D.Viewer({
+    cameraUp: up,
+    initialCameraPosition: [0, 0, 3],
+    initialCameraLookAt:   [0, 0, 0],
+    selfDrivenMode: false,
+    useBuiltInControls: false,
+    renderMode: GaussianSplats3D.RenderMode.Always,
+    sharedMemoryForWorkers: false,
+  });
+}
+
+function setupControls() {
+  // OrbitControls handles touch natively:
+  //   1 finger drag = rotate (orbit), 2 finger drag = pan, pinch = dolly (zoom).
+  controls = new OrbitControls(viewer.camera, viewer.renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.rotateSpeed = 0.7;
+  controls.zoomSpeed = 1.0;
+  controls.panSpeed = 0.8;
+  controls.minDistance = 0.1;
+  controls.maxDistance = 100;
+  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+  controls.target.set(0, 0, 0);
+  controls.update();
+
+  function tick() {
+    rafId = requestAnimationFrame(tick);
+    if (controls?.enabled) controls.update();
+    viewer.update();
+    viewer.render();
+  }
+  tick();
+}
+
+// ── Helpers (floor grid + axes), shown only in rotate-model mode ──────────────
+function buildHelpers() {
+  // Get the underlying three scene to attach helpers to
+  const scene = viewer.threeScene || viewer.splatMesh?.parent;
+  if (!scene) return null;
+  const g = new THREE.Group();
+  const grid = new THREE.GridHelper(10, 20, 0x4a6a8a, 0x2a3a4a);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.55;
+  const axes = new THREE.AxesHelper(1.5);
+  g.add(grid);
+  g.add(axes);
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+
+function updateHelpersVisibility() {
+  if (!helpers) helpers = buildHelpers();
+  if (helpers) helpers.visible = axesOn || lockMode;
+}
+
+// ── Pointer handling for rotate-model mode ────────────────────────────────────
+const canvasParent = document.body;
+
+canvasParent.addEventListener('pointerdown', e => {
+  if (!lockMode) return;
+  if (e.target.tagName !== 'CANVAS') return;
+  drag.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (drag.pointers.size === 1) {
+    drag.active = true;
+    drag.lastX = e.clientX;
+    drag.lastY = e.clientY;
+  }
+});
+
+canvasParent.addEventListener('pointermove', e => {
+  if (!lockMode || !drag.active || !viewer?.splatMesh) return;
+  if (!drag.pointers.has(e.pointerId)) return;
+  drag.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  // single-finger drag rotates around world Y (yaw) and screen-X (pitch)
+  if (drag.pointers.size === 1) {
+    const dx = e.clientX - drag.lastX;
+    const dy = e.clientY - drag.lastY;
+    drag.lastX = e.clientX;
+    drag.lastY = e.clientY;
+    const SENS = 0.5 * D2R;
+    viewer.splatMesh.rotation.y += dx * SENS;
+    viewer.splatMesh.rotation.x += dy * SENS;
+  }
+});
+
+function endPointer(e) {
+  drag.pointers.delete(e.pointerId);
+  if (drag.pointers.size === 0) drag.active = false;
+  else {
+    // continue tracking from the remaining pointer
+    const p = drag.pointers.values().next().value;
+    drag.lastX = p.x; drag.lastY = p.y;
+  }
+}
+canvasParent.addEventListener('pointerup',     endPointer);
+canvasParent.addEventListener('pointercancel', endPointer);
+
+// ── Load scene ────────────────────────────────────────────────────────────────
+async function loadScene(url) {
+  if (url.startsWith('/splats/'))
+    history.replaceState(null, '', '?model=' + encodeURIComponent(url.slice(8)));
+  status.textContent = 'Loading…';
+  status.classList.remove('hidden');
+  buildViewer();
+  setupControls();
+  try {
+    await viewer.addSplatScene(url, {
+      splatAlphaRemovalThreshold: parseInt($('alpha-range').value),
+      showLoadingUI: false,
+      progressiveLoad: true,
+    });
+    // reset rotation + helpers on new scene
+    if (viewer.splatMesh) viewer.splatMesh.rotation.set(0, 0, 0);
+    helpers = null;
+    updateHelpersVisibility();
+    applyDotSize();
+    status.classList.add('hidden');
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+  }
+}
+
+// ── Mode toggle (orbit vs rotate-model) ───────────────────────────────────────
+function showPill(text) {
+  modePill.textContent = text;
+  modePill.classList.add('show');
+  clearTimeout(showPill._t);
+  showPill._t = setTimeout(() => modePill.classList.remove('show'), 1200);
+}
+
+function setLockMode(on) {
+  lockMode = on;
+  if (controls) controls.enabled = !on;
+  $('lock-btn').classList.toggle('active', on);
+  $('lock-btn').querySelector('span:last-child').textContent = on ? 'Orbit Camera' : 'Rotate Model';
+  $('lock-btn').querySelector('.ico').textContent = on ? '🔓' : '🔒';
+  updateHelpersVisibility();
+  showPill(on ? 'Rotate Model — drag to spin' : 'Orbit Mode');
+}
+
+$('lock-btn').addEventListener('click', () => setLockMode(!lockMode));
+
+$('reset-btn').addEventListener('click', () => {
+  if (viewer?.splatMesh) viewer.splatMesh.rotation.set(0, 0, 0);
+  if (controls) {
+    viewer.camera.position.set(0, 0, 3);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }
+  showPill('Reset');
+});
+
+$('axes-btn').addEventListener('click', () => {
+  axesOn = !axesOn;
+  $('axes-btn').classList.toggle('active', axesOn);
+  updateHelpersVisibility();
+});
+
+// ── Settings sheet ────────────────────────────────────────────────────────────
+const sheet = $('sheet'), sheetBg = $('sheet-bg');
+function openSheet()  { sheet.classList.add('open');  sheetBg.classList.add('open');  }
+function closeSheet() { sheet.classList.remove('open'); sheetBg.classList.remove('open'); }
+$('settings-btn').addEventListener('click', openSheet);
+sheetBg.addEventListener('click', closeSheet);
+$('sheet-handle').addEventListener('click', closeSheet);
+
+$('up-select').addEventListener('change', () => {
+  if (select.value) loadScene('/splats/' + select.value);
+});
+$('alpha-range').addEventListener('input', e => { $('alpha-val').textContent = e.target.value; });
+$('alpha-range').addEventListener('change', () => {
+  if (select.value) loadScene('/splats/' + select.value);
+});
+
+function applyDotSize() {
+  const s = parseFloat($('size-range').value);
+  $('size-val').textContent = s.toFixed(2) + '×';
+  const mesh = viewer?.splatMesh;
+  if (!mesh) return;
+  // Write to whichever uniform / property the library version exposes
+  const u = mesh.material?.uniforms;
+  if (u?.splatScale)  u.splatScale.value  = s;
+  if (u?.pointScale)  u.pointScale.value  = s;
+  if (typeof mesh.setSplatScale === 'function') mesh.setSplatScale(s);
+}
+$('size-range').addEventListener('input', applyDotSize);
+
+// ── Dropdown ──────────────────────────────────────────────────────────────────
+async function populateDropdown() {
+  try {
+    const files = await fetch('/splats/list').then(r => r.json());
+    if (!files.length) throw new Error('empty');
+    files.sort((a, b) => {
+      if (a === PREFERRED) return -1;
+      if (b === PREFERRED) return  1;
+      return b.localeCompare(a);
+    });
+    select.innerHTML = files.map(f =>
+      `<option value="${f}"${f === PREFERRED ? ' selected' : ''}>${f}</option>`
+    ).join('');
+    loadScene('/splats/' + (files.includes(PREFERRED) ? PREFERRED : files[0]));
+  } catch {
+    select.innerHTML = '<option value="">No splats found</option>';
+    status.textContent = 'No .ply files on server.';
+  }
+}
+
+select.addEventListener('change', () => { if (select.value) loadScene('/splats/' + select.value); });
+
+$('copy-link-btn').addEventListener('click', e => {
+  e.preventDefault();
+  navigator.clipboard?.writeText(location.href).then(() => {
+    const prev = $('copy-link-btn').textContent;
+    $('copy-link-btn').textContent = '✓ Copied!';
+    setTimeout(() => { $('copy-link-btn').textContent = prev; }, 1500);
+  });
+});
+
+// prevent browser pull-to-refresh / pinch-zoom anywhere on body
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('touchmove', e => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
+populateDropdown();
+</script>
+</body>
+</html>
