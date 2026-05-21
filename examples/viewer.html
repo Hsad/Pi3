@@ -68,6 +68,7 @@
 <div id="lock-overlay">
   <h2>Click to Explore</h2>
   <p>WASD · move &nbsp;|&nbsp; Mouse · look &nbsp;|&nbsp; Space / C · up / down</p>
+  <p>Middle drag · orient scene &nbsp;|&nbsp; Scroll · point size</p>
   <p>Esc · release mouse &amp; access controls</p>
 </div>
 <div id="crosshair"></div>
@@ -130,7 +131,6 @@
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 
 const status    = document.getElementById('status');
 const overlay   = document.getElementById('lock-overlay');
@@ -215,18 +215,185 @@ function scaleHelpers(sceneSize) {
 }
 
 // ── Load geometry ─────────────────────────────────────────────────────────────
-function loadGeometry(geometry) {
-  geometry.computeBoundingBox();
-  const box    = geometry.boundingBox;
+// ── Streaming PLY loader ──────────────────────────────────────────────────────
+let loadAc = null;
+
+async function streamPly(source) {
+  if (loadAc) loadAc.abort();
+  loadAc = new AbortController();
+  const myAc = loadAc;
+
+  const TYPE_SIZE = {
+    float:4, float32:4, double:8, float64:8,
+    uchar:1, uint8:1, char:1, int8:1,
+    short:2, ushort:2, int16:2, uint16:2,
+    int:4, uint:4, int32:4, uint32:4
+  };
+
+  function typeRead(view, type, offset, le) {
+    switch (type) {
+      case 'float': case 'float32': return view.getFloat32(offset, le);
+      case 'double': case 'float64': return view.getFloat64(offset, le);
+      case 'uchar': case 'uint8': return view.getUint8(offset);
+      case 'char': case 'int8': return view.getInt8(offset);
+      case 'short': case 'int16': return view.getInt16(offset, le);
+      case 'ushort': case 'uint16': return view.getUint16(offset, le);
+      case 'int': case 'int32': return view.getInt32(offset, le);
+      case 'uint': case 'uint32': return view.getUint32(offset, le);
+      default: return 0;
+    }
+  }
+
+  let buf = new Uint8Array(0);
+  function appendBuf(chunk) {
+    const next = new Uint8Array(buf.length + chunk.length);
+    next.set(buf); next.set(chunk, buf.length);
+    buf = next;
+  }
+
+  let stream;
+  try {
+    stream = typeof source === 'string'
+      ? (await fetch(source, { signal: myAc.signal })).body
+      : source.stream();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    throw e;
+  }
+
+  const reader = stream.getReader();
+  const dec = new TextDecoder('latin1');
+
+  let headerDone = false, isAscii = false, isBinaryLE = true;
+  let vertexCount = 0, bytesPerVertex = 0, props = [];
+  let xI = -1, yI = -1, zI = -1, rI = -1, gI = -1, bI = -1;
+  let posArr, colArr;
+  let filled = 0, lastUpdate = 0;
+  let asciiTail = '';
+
+  function parseHeader() {
+    const text = dec.decode(buf);
+    const endMark = 'end_header\n';
+    const ei = text.indexOf(endMark);
+    if (ei === -1) return false;
+    for (const raw of text.slice(0, ei).split('\n')) {
+      const p = raw.trim().split(/\s+/);
+      if (p[0] === 'format') { isAscii = p[1] === 'ascii'; isBinaryLE = p[1] === 'binary_little_endian'; }
+      if (p[0] === 'element' && p[1] === 'vertex') vertexCount = parseInt(p[2]);
+      if (p[0] === 'property' && p[1] !== 'list') {
+        props.push({ name: p[2], type: p[1], offset: bytesPerVertex, size: TYPE_SIZE[p[1]] || 4 });
+        bytesPerVertex += TYPE_SIZE[p[1]] || 4;
+      }
+    }
+    props.forEach((p, i) => {
+      if      (p.name === 'x')                     xI = i;
+      else if (p.name === 'y')                     yI = i;
+      else if (p.name === 'z')                     zI = i;
+      else if (p.name === 'red'   || p.name === 'r') rI = i;
+      else if (p.name === 'green' || p.name === 'g') gI = i;
+      else if (p.name === 'blue'  || p.name === 'b') bI = i;
+    });
+    buf = buf.slice(new TextEncoder().encode(text.slice(0, ei + endMark.length)).length);
+    return true;
+  }
+
+  function updateDraw() {
+    if (filled - lastUpdate < Math.ceil(vertexCount / 20) && filled < vertexCount) return;
+    cloud.geometry.setDrawRange(0, filled);
+    cloud.geometry.attributes.position.needsUpdate = true;
+    cloud.geometry.attributes.color.needsUpdate = true;
+    lastUpdate = filled;
+    status.textContent = `Loading… ${Math.round(filled / vertexCount * 100)}%`;
+  }
+
+  function processBinary() {
+    const view = new DataView(buf.buffer);
+    const n = Math.min(Math.floor(buf.length / bytesPerVertex), vertexCount - filled);
+    for (let i = 0; i < n; i++) {
+      const base = i * bytesPerVertex, i3 = (filled + i) * 3;
+      posArr[i3]   = typeRead(view, props[xI].type, base + props[xI].offset, isBinaryLE);
+      posArr[i3+1] = typeRead(view, props[yI].type, base + props[yI].offset, isBinaryLE);
+      posArr[i3+2] = typeRead(view, props[zI].type, base + props[zI].offset, isBinaryLE);
+      if (rI >= 0) {
+        const s = (props[rI].type === 'uchar' || props[rI].type === 'uint8') ? 1/255 : 1;
+        colArr[i3]   = typeRead(view, props[rI].type, base + props[rI].offset, isBinaryLE) * s;
+        colArr[i3+1] = typeRead(view, props[gI].type, base + props[gI].offset, isBinaryLE) * s;
+        colArr[i3+2] = typeRead(view, props[bI].type, base + props[bI].offset, isBinaryLE) * s;
+      } else {
+        colArr[i3] = colArr[i3+1] = colArr[i3+2] = 1;
+      }
+    }
+    filled += n;
+    buf = buf.slice(n * bytesPerVertex);
+    updateDraw();
+  }
+
+  function processAscii() {
+    const text = dec.decode(buf);
+    buf = new Uint8Array(0);
+    const lines = (asciiTail + text).split('\n');
+    asciiTail = lines.pop();
+    for (const line of lines) {
+      if (filled >= vertexCount) break;
+      const v = line.trim().split(/\s+/);
+      if (v.length <= Math.max(xI, yI, zI)) continue;
+      const i3 = filled * 3;
+      posArr[i3]   = parseFloat(v[xI]);
+      posArr[i3+1] = parseFloat(v[yI]);
+      posArr[i3+2] = parseFloat(v[zI]);
+      if (rI >= 0) {
+        const s = (props[rI].type === 'uchar' || props[rI].type === 'uint8') ? 1/255 : 1;
+        colArr[i3]   = parseFloat(v[rI]) * s;
+        colArr[i3+1] = parseFloat(v[gI]) * s;
+        colArr[i3+2] = parseFloat(v[bI]) * s;
+      } else {
+        colArr[i3] = colArr[i3+1] = colArr[i3+2] = 1;
+      }
+      filled++;
+    }
+    updateDraw();
+  }
+
+  while (true) {
+    let done, value;
+    try { ({ done, value } = await reader.read()); }
+    catch (e) { if (e.name === 'AbortError') return; throw e; }
+    if (done) break;
+
+    appendBuf(value);
+
+    if (!headerDone) {
+      headerDone = parseHeader();
+      if (headerDone) {
+        if (vertexCount <= 0) throw new Error('PLY: no vertex count in header');
+        posArr = new Float32Array(vertexCount * 3);
+        colArr = new Float32Array(vertexCount * 3);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(colArr, 3));
+        geo.setDrawRange(0, 0);
+        if (cloud) scene.remove(cloud);
+        cloud = new THREE.Points(geo, material);
+        scene.add(cloud);
+        if (buf.length) { if (isAscii) processAscii(); else processBinary(); }
+      }
+    } else {
+      if (isAscii) processAscii(); else processBinary();
+    }
+  }
+
+  if (myAc.signal.aborted) return;
+
+  // Finalize: center and position camera
+  cloud.geometry.setDrawRange(0, filled);
+  cloud.geometry.attributes.position.needsUpdate = true;
+  cloud.geometry.attributes.color.needsUpdate = true;
+  cloud.geometry.computeBoundingBox();
+  const box = cloud.geometry.boundingBox;
   const center = new THREE.Vector3();
   box.getCenter(center);
-  const size   = box.getSize(new THREE.Vector3()).length();
-  geometry.translate(-center.x, -center.y, -center.z);
-
-  if (cloud) scene.remove(cloud);
-  cloud = new THREE.Points(geometry, material);
-  scene.add(cloud);
-
+  const size = box.getSize(new THREE.Vector3()).length();
+  cloud.position.set(-center.x, -center.y, -center.z);
   material.size = size * parseFloat(document.getElementById('sz').value) * 0.0008;
   moveSpeed = size * 0.3;
   scaleHelpers(size);
@@ -234,28 +401,24 @@ function loadGeometry(geometry) {
   camera.near = size * 0.0005;
   camera.far  = size * 20;
   camera.updateProjectionMatrix();
-
-  // OpenCV (Y-down, Z-forward) → three.js (Y-up, Z-backward): rotate 180° around X
   document.getElementById('rx').value = 180;
   document.getElementById('rx-val').textContent = '180°';
-  document.getElementById('ry').value = 0;
-  document.getElementById('ry-val').textContent = '0°';
-  document.getElementById('rz').value = 0;
-  document.getElementById('rz-val').textContent = '0°';
+  ['ry', 'rz'].forEach(id => {
+    document.getElementById(id).value = 0;
+    document.getElementById(id + '-val').textContent = '0°';
+  });
   cloud.rotation.set(Math.PI, 0, 0);
-
   status.style.display = 'none';
 }
 
 // ── Collection + model dropdown ───────────────────────────────────────────────
 const FALLBACK         = 'result_conf07_simplified.ply';
-const loader           = new PLYLoader();
 const collectionSelect = document.getElementById('collection-select');
 
 function plyUrl(collection, name) {
   return collection === 'apex'
-    ? `/apex-runs/${encodeURIComponent(name)}/pointcloud.ply`
-    : name;  // examples: relative, resolves under /examples/
+    ? `/apex-runs/${encodeURIComponent(name)}/pointcloud.ply?shuffle=1`
+    : `/examples/${encodeURIComponent(name)}?shuffle=1`;
 }
 
 async function populateDropdown() {
@@ -296,12 +459,7 @@ function loadFile(collection, name) {
     history.replaceState(null, '', '?model=' + encodeURIComponent(name));
   const url = plyUrl(collection, name);
   status.textContent = 'Loading…'; status.style.display = 'block';
-  loader.load(
-    url,
-    geo => { status.textContent = 'Building scene…'; loadGeometry(geo); },
-    xhr => { if (xhr.total) status.textContent = `Loading… ${Math.round(xhr.loaded / xhr.total * 100)}%`; },
-    ()  => { status.textContent = `Failed to load ${url}`; }
-  );
+  streamPly(url).catch(err => { status.textContent = `Failed to load: ${err.message}`; });
 }
 
 collectionSelect.addEventListener('change', populateDropdown);
@@ -327,16 +485,11 @@ document.getElementById('open-btn').addEventListener('click', () =>
 document.getElementById('file-input').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
-  status.textContent = 'Reading…'; status.style.display = 'block';
-  // add to dropdown if not already there
-  if (![...select.options].some(o => o.value === file.name)) {
-    const opt = new Option(file.name, file.name);
-    select.add(opt);
-  }
+  if (![...select.options].some(o => o.value === file.name))
+    select.add(new Option(file.name, file.name));
   select.value = file.name;
-  const reader = new FileReader();
-  reader.onload = ev => { status.textContent = 'Parsing…'; loader.parse(ev.target.result, geo => loadGeometry(geo)); };
-  reader.readAsArrayBuffer(file);
+  status.textContent = 'Loading…'; status.style.display = 'block';
+  streamPly(file).catch(err => { status.textContent = `Failed: ${err.message}`; });
 });
 
 // ── Sliders ───────────────────────────────────────────────────────────────────

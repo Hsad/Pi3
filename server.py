@@ -7,6 +7,7 @@ import threading
 import uuid
 from pathlib import Path
 
+import numpy as np
 from flask import Flask, Response, jsonify, redirect, request, send_file, send_from_directory
 
 ROOT         = Path(__file__).parent.resolve()
@@ -33,6 +34,47 @@ VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv"}
 def safe(name: str) -> str:
     """Allow only word chars, dash, dot — no path traversal."""
     return re.sub(r"[^\w.\-]", "_", name)
+
+
+# ── PLY shuffle helper ────────────────────────────────────────────────────────
+
+def _shuffled_ply_response(path):
+    """Stream a PLY file with vertex order shuffled so spatial regions interleave."""
+    TYPE_SIZES = {
+        'float': 4, 'float32': 4, 'double': 8, 'float64': 8,
+        'uchar': 1, 'uint8': 1, 'char': 1, 'int8': 1,
+        'short': 2, 'ushort': 2, 'int16': 2, 'uint16': 2,
+        'int': 4, 'uint': 4, 'int32': 4, 'uint32': 4,
+    }
+    data = path.read_bytes()
+    marker = b'end_header\n'
+    mi = data.find(marker)
+    if mi == -1:
+        return send_file(path)
+    header_end = mi + len(marker)
+    header = data[:header_end]
+    body   = data[header_end:]
+
+    vertex_count, bpv = 0, 0
+    for line in header.decode('latin1').split('\n'):
+        parts = line.strip().split()
+        if len(parts) >= 3 and parts[0] == 'element' and parts[1] == 'vertex':
+            vertex_count = int(parts[2])
+        if len(parts) >= 3 and parts[0] == 'property' and parts[1] != 'list':
+            bpv += TYPE_SIZES.get(parts[1], 4)
+
+    if vertex_count == 0 or bpv == 0 or len(body) < vertex_count * bpv:
+        return send_file(path)
+
+    arr = np.frombuffer(body, dtype=np.uint8)[:vertex_count * bpv].reshape(vertex_count, bpv).copy()
+    np.random.shuffle(arr)
+
+    def generate():
+        yield header
+        yield arr.tobytes()
+
+    return Response(generate(), mimetype='application/octet-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 # ── Static ────────────────────────────────────────────────────────────────────
@@ -64,6 +106,8 @@ def models_json():
 
 @app.route("/examples/<path:filename>")
 def serve_example(filename):
+    if request.args.get('shuffle') and filename.lower().endswith('.ply'):
+        return _shuffled_ply_response(EXAMPLES / filename)
     return send_from_directory(EXAMPLES, filename)
 
 
@@ -80,6 +124,9 @@ def list_apex_runs():
 @app.route("/apex-runs/<name>/pointcloud.ply")
 def serve_apex_ply(name):
     safe_name = re.sub(r"[^\w.\-+]", "_", name)
+    path = APEX_DATASETS / safe_name / "pointcloud.ply"
+    if request.args.get('shuffle'):
+        return _shuffled_ply_response(path)
     return send_from_directory(APEX_DATASETS / safe_name, "pointcloud.ply")
 
 
