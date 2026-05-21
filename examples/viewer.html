@@ -375,6 +375,13 @@ async function streamPly(source) {
         geo.setDrawRange(0, 0);
         if (cloud) scene.remove(cloud);
         cloud = new THREE.Points(geo, material);
+        cloud.rotation.set(Math.PI, 0, 0);
+        document.getElementById('rx').value = 180;
+        document.getElementById('rx-val').textContent = '180°';
+        ['ry', 'rz'].forEach(id => {
+          document.getElementById(id).value = 0;
+          document.getElementById(id + '-val').textContent = '0°';
+        });
         scene.add(cloud);
         if (buf.length) { if (isAscii) processAscii(); else processBinary(); }
       }
@@ -402,13 +409,6 @@ async function streamPly(source) {
   camera.near = size * 0.0005;
   camera.far  = size * 20;
   camera.updateProjectionMatrix();
-  document.getElementById('rx').value = 180;
-  document.getElementById('rx-val').textContent = '180°';
-  ['ry', 'rz'].forEach(id => {
-    document.getElementById(id).value = 0;
-    document.getElementById(id + '-val').textContent = '0°';
-  });
-  cloud.rotation.set(Math.PI, 0, 0);
   status.style.display = 'none';
 }
 
