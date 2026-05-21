@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# DEPRECATED: Gaussian splat pipeline is no longer in use. Use infer.py for point clouds.
 """
 Pi3 → 3D Gaussian Splat pipeline.
 
