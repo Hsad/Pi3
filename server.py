@@ -49,6 +49,10 @@ def upload_page():
 def splat_viewer():
     return send_file(ROOT / "splat_viewer.html")
 
+@app.route("/mobile")
+def mobile_viewer():
+    return send_file(ROOT / "mobile.html")
+
 @app.route("/splats/list")
 def list_splats():
     return jsonify(sorted(f.name for f in SPLATS.glob("*.ply")))
