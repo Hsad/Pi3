@@ -432,10 +432,13 @@ async function populateDropdown() {
     }
     if (!names.length) throw new Error('empty');
 
-    // ?model= URL param selects a specific entry on load (examples only)
-    const urlParam  = new URLSearchParams(location.search).get('model');
-    const preferred = (collection === 'examples' && urlParam && names.includes(urlParam))
-      ? urlParam : (collection === 'examples' && names.includes(FALLBACK) ? FALLBACK : null);
+    // Read both ?collection= and ?model= from URL
+    const p          = new URLSearchParams(location.search);
+    const urlColl    = p.get('collection') || 'examples';  // no param → examples
+    const urlModel   = p.get('model');
+    const preferred  = (urlColl === collection && urlModel && names.includes(urlModel))
+      ? urlModel
+      : (collection === 'examples' && names.includes(FALLBACK) ? FALLBACK : null);
 
     names.sort((a, b) => {
       if (a === preferred) return -1;
@@ -455,8 +458,7 @@ async function populateDropdown() {
 }
 
 function loadFile(collection, name) {
-  if (collection === 'examples')
-    history.replaceState(null, '', '?model=' + encodeURIComponent(name));
+  history.replaceState(null, '', '?' + new URLSearchParams({ collection, model: name }));
   const url = plyUrl(collection, name);
   status.textContent = 'Loading…'; status.style.display = 'block';
   streamPly(url).catch(err => { status.textContent = `Failed to load: ${err.message}`; });
@@ -476,6 +478,12 @@ document.getElementById('copy-link-btn').addEventListener('click', () => {
   });
 });
 
+// Restore collection from URL before first fetch
+{
+  const initColl = new URLSearchParams(location.search).get('collection');
+  if (initColl && [...collectionSelect.options].some(o => o.value === initColl))
+    collectionSelect.value = initColl;
+}
 populateDropdown();
 
 // ── Open local file ───────────────────────────────────────────────────────────
