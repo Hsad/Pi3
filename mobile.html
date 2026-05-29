@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#0c0c14">
-<title>Splat Viewer — Mobile</title>
+<title>Point Cloud — Mobile</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; width: 100%; overflow: hidden; overscroll-behavior: none; touch-action: none; }
@@ -32,6 +32,21 @@
     appearance: none; -webkit-appearance: none;
     backdrop-filter: blur(8px);
   }
+
+  /* segmented collection picker */
+  #coll-tabs {
+    display: flex; flex-shrink: 0;
+    background: rgba(20,20,32,0.85); border: 1px solid #2a2a3a;
+    border-radius: 8px; overflow: hidden; backdrop-filter: blur(8px);
+  }
+  #coll-tabs button {
+    background: transparent; border: 0; color: #99a;
+    padding: 10px 10px; font-size: 12px; font-weight: 600;
+    cursor: pointer; letter-spacing: 0.02em;
+  }
+  #coll-tabs button + button { border-left: 1px solid #2a2a3a; }
+  #coll-tabs button.active { background: rgba(70,120,170,0.85); color: #fff; }
+  #coll-tabs button:active { background: rgba(40,55,80,0.92); }
   .icon-btn {
     width: 42px; height: 42px; flex-shrink: 0;
     background: rgba(20,20,32,0.85); border: 1px solid #2a2a3a;
@@ -41,7 +56,7 @@
   }
   .icon-btn:active { background: rgba(40,55,80,0.9); }
 
-  /* ── Status / hint overlays ── */
+  /* ── Status / hint ── */
   #status {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
     font-size: 15px; color: #aab; padding: 14px 18px;
@@ -49,7 +64,6 @@
     backdrop-filter: blur(8px); z-index: 8;
   }
   #status.hidden { display: none; }
-
   #mode-pill {
     position: fixed; left: 50%; transform: translateX(-50%);
     top: calc(env(safe-area-inset-top) + 64px);
@@ -63,15 +77,12 @@
 
   /* ── Bottom controls ── */
   #bottom {
-    position: fixed; left: 0; right: 0;
-    bottom: 0;
+    position: fixed; left: 0; right: 0; bottom: 0;
     padding: 10px 12px calc(env(safe-area-inset-bottom) + 12px);
     background: linear-gradient(to top, rgba(12,12,20,0.92), rgba(12,12,20,0));
     z-index: 10;
   }
-  #btn-row {
-    display: flex; gap: 8px; justify-content: center;
-  }
+  #btn-row { display: flex; gap: 8px; justify-content: center; }
   .ctl-btn {
     flex: 1; max-width: 130px;
     padding: 12px 8px; font-size: 13px; font-weight: 600;
@@ -86,7 +97,7 @@
   }
   .ctl-btn .ico { font-size: 16px; }
 
-  /* ── Sheet (settings) ── */
+  /* ── Sheet ── */
   #sheet-bg {
     position: fixed; inset: 0; background: rgba(0,0,0,0.5);
     opacity: 0; pointer-events: none; transition: opacity 0.2s;
@@ -100,6 +111,7 @@
     padding: 8px 16px calc(env(safe-area-inset-bottom) + 18px);
     transform: translateY(100%); transition: transform 0.25s ease;
     z-index: 21; border-top: 1px solid #2a2a3a;
+    max-height: 85vh; overflow-y: auto;
   }
   #sheet.open { transform: translateY(0); }
   #sheet-handle {
@@ -116,9 +128,7 @@
     display: flex; justify-content: space-between; font-size: 13px; color: #aab;
   }
   .sheet-row label span { color: #fff; font-variant-numeric: tabular-nums; }
-  .sheet-row input[type=range] {
-    width: 100%; height: 32px; accent-color: #58a;
-  }
+  .sheet-row input[type=range] { width: 100%; height: 32px; accent-color: #58a; }
   .sheet-row select {
     width: 100%; background: #1a1a2a; color: #eee;
     border: 1px solid #333; border-radius: 8px;
@@ -139,13 +149,17 @@
 <div id="mode-pill">Orbit Mode</div>
 
 <div id="topbar">
+  <div id="coll-tabs">
+    <button data-coll="examples" class="active">Examples</button>
+    <button data-coll="apex">Apex</button>
+  </div>
   <select id="model-select"><option value="">Scanning…</option></select>
   <div id="settings-btn" class="icon-btn">⚙</div>
 </div>
 
 <div id="bottom">
   <div id="btn-row">
-    <button id="lock-btn" class="ctl-btn"><span class="ico">🔒</span><span>Rotate Model</span></button>
+    <button id="lock-btn" class="ctl-btn"><span class="ico">🔒</span><span id="lock-label">Rotate Model</span></button>
     <button id="reset-btn" class="ctl-btn"><span class="ico">⟲</span><span>Reset</span></button>
     <button id="axes-btn" class="ctl-btn"><span class="ico">📐</span><span>Axes</span></button>
   </div>
@@ -155,22 +169,10 @@
 <div id="sheet">
   <div id="sheet-handle"></div>
 
-  <h3>Render</h3>
+  <h3>Display</h3>
   <div class="sheet-row">
-    <label>Camera Up</label>
-    <select id="up-select">
-      <option value="0,1,0">Y up (OpenGL)</option>
-      <option value="0,-1,0">Y down (OpenCV)</option>
-      <option value="0,0,1">Z up</option>
-    </select>
-  </div>
-  <div class="sheet-row">
-    <label>Alpha Cutoff <span id="alpha-val">5</span></label>
-    <input type="range" id="alpha-range" min="0" max="50" step="1" value="5">
-  </div>
-  <div class="sheet-row">
-    <label>Dot Size <span id="size-val">1.00×</span></label>
-    <input type="range" id="size-range" min="0.1" max="3" step="0.05" value="1">
+    <label>Point Size <span id="sz-val">3</span></label>
+    <input type="range" id="sz" min="0.1" max="20" step="0.1" value="3">
   </div>
 
   <h3>Share</h3>
@@ -191,98 +193,284 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js';
 
 const $ = id => document.getElementById(id);
 const status   = $('status');
 const select   = $('model-select');
+const collTabs = $('coll-tabs');
 const modePill = $('mode-pill');
-
-const PREFERRED = new URLSearchParams(location.search).get('model') || '';
 const D2R = Math.PI / 180;
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let viewer    = null;
-let controls  = null;
-let helpers   = null;     // group: grid + axes
-let rafId     = null;
-let lockMode  = false;    // false = orbit camera, true = rotate model
-let axesOn    = false;
+let currentCollection = 'examples';
+function setCollection(name) {
+  currentCollection = name;
+  collTabs.querySelectorAll('button').forEach(b =>
+    b.classList.toggle('active', b.dataset.coll === name));
+}
 
-// touch drag for rotate-model mode
+// ── Renderer / scene / camera ─────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0c14);
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.001, 2000);
+camera.position.set(0, 0, 3);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.rotateSpeed = 0.7;
+controls.zoomSpeed = 1.0;
+controls.panSpeed = 0.8;
+controls.minDistance = 0.001;
+controls.maxDistance = 2000;
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+controls.target.set(0, 0, 0);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ── Material + helpers ────────────────────────────────────────────────────────
+function makeCircleTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff'; ctx.fill();
+  return new THREE.CanvasTexture(c);
+}
+const material = new THREE.PointsMaterial({
+  vertexColors: true, sizeAttenuation: true, size: 0.03,
+  map: makeCircleTex(), alphaTest: 0.5, transparent: true,
+});
+let cloud = null;
+let sceneSize = 1;
+let szBase = 1;  // material.size = szBase * (slider/3)
+
+const gridHelper = new THREE.GridHelper(2, 20, 0x4a6a8a, 0x2a3a4a);
+gridHelper.material.transparent = true; gridHelper.material.opacity = 0.55;
+const axesHelper = new THREE.AxesHelper(1);
+gridHelper.visible = false;
+axesHelper.visible = false;
+scene.add(gridHelper);
+scene.add(axesHelper);
+
+function scaleHelpers(s) {
+  gridHelper.scale.setScalar(s * 0.6);
+  axesHelper.scale.setScalar(s * 0.3);
+}
+
+function applyPointSize() {
+  const v = parseFloat($('sz').value);
+  $('sz-val').textContent = v.toFixed(1);
+  material.size = szBase * (v / 3);
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let lockMode = false;
+let axesOn   = false;
 const drag = { active: false, lastX: 0, lastY: 0, pointers: new Map() };
 
-// ── Build / teardown ──────────────────────────────────────────────────────────
-function buildViewer() {
-  if (controls) { controls.dispose(); controls = null; }
-  if (rafId)    { cancelAnimationFrame(rafId); rafId = null; }
-  if (viewer)   { viewer.dispose(); viewer = null; }
-  helpers = null;
+// ── Streaming PLY loader (adapted from examples/viewer.html) ──────────────────
+let loadAc = null;
 
-  const up = $('up-select').value.split(',').map(Number);
-  viewer = new GaussianSplats3D.Viewer({
-    cameraUp: up,
-    initialCameraPosition: [0, 0, 3],
-    initialCameraLookAt:   [0, 0, 0],
-    selfDrivenMode: false,
-    useBuiltInControls: false,
-    renderMode: GaussianSplats3D.RenderMode.Always,
-    sharedMemoryForWorkers: false,
-  });
-}
+async function streamPly(source) {
+  if (loadAc) loadAc.abort();
+  loadAc = new AbortController();
+  const myAc = loadAc;
 
-function setupControls() {
-  // OrbitControls handles touch natively:
-  //   1 finger drag = rotate (orbit), 2 finger drag = pan, pinch = dolly (zoom).
-  controls = new OrbitControls(viewer.camera, viewer.renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.1;
-  controls.rotateSpeed = 0.7;
-  controls.zoomSpeed = 1.0;
-  controls.panSpeed = 0.8;
-  controls.minDistance = 0.1;
-  controls.maxDistance = 100;
-  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-  controls.target.set(0, 0, 0);
-  controls.update();
-
-  function tick() {
-    rafId = requestAnimationFrame(tick);
-    if (controls?.enabled) controls.update();
-    viewer.update();
-    viewer.render();
+  const TYPE_SIZE = {
+    float:4, float32:4, double:8, float64:8,
+    uchar:1, uint8:1, char:1, int8:1,
+    short:2, ushort:2, int16:2, uint16:2,
+    int:4, uint:4, int32:4, uint32:4
+  };
+  function typeRead(view, type, offset, le) {
+    switch (type) {
+      case 'float': case 'float32': return view.getFloat32(offset, le);
+      case 'double': case 'float64': return view.getFloat64(offset, le);
+      case 'uchar': case 'uint8': return view.getUint8(offset);
+      case 'char':  case 'int8':  return view.getInt8(offset);
+      case 'short': case 'int16': return view.getInt16(offset, le);
+      case 'ushort': case 'uint16': return view.getUint16(offset, le);
+      case 'int':   case 'int32': return view.getInt32(offset, le);
+      case 'uint':  case 'uint32': return view.getUint32(offset, le);
+      default: return 0;
+    }
   }
-  tick();
-}
 
-// ── Helpers (floor grid + axes), shown only in rotate-model mode ──────────────
-function buildHelpers() {
-  // Get the underlying three scene to attach helpers to
-  const scene = viewer.threeScene || viewer.splatMesh?.parent;
-  if (!scene) return null;
-  const g = new THREE.Group();
-  const grid = new THREE.GridHelper(10, 20, 0x4a6a8a, 0x2a3a4a);
-  grid.material.transparent = true;
-  grid.material.opacity = 0.55;
-  const axes = new THREE.AxesHelper(1.5);
-  g.add(grid);
-  g.add(axes);
-  g.visible = false;
-  scene.add(g);
-  return g;
-}
+  let buf = new Uint8Array(0);
+  function appendBuf(chunk) {
+    const next = new Uint8Array(buf.length + chunk.length);
+    next.set(buf); next.set(chunk, buf.length);
+    buf = next;
+  }
 
-function updateHelpersVisibility() {
-  if (!helpers) helpers = buildHelpers();
-  if (helpers) helpers.visible = axesOn || lockMode;
+  let stream;
+  try {
+    stream = (await fetch(source, { signal: myAc.signal })).body;
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    throw e;
+  }
+  const reader = stream.getReader();
+  const dec = new TextDecoder('latin1');
+
+  let headerDone = false, isAscii = false, isBinaryLE = true;
+  let vertexCount = 0, bytesPerVertex = 0, props = [];
+  let xI=-1, yI=-1, zI=-1, rI=-1, gI=-1, bI=-1;
+  let posArr, colArr;
+  let filled = 0, lastUpdate = 0;
+  let asciiTail = '';
+
+  function parseHeader() {
+    const text = dec.decode(buf);
+    const endMark = 'end_header\n';
+    const ei = text.indexOf(endMark);
+    if (ei === -1) return false;
+    for (const raw of text.slice(0, ei).split('\n')) {
+      const p = raw.trim().split(/\s+/);
+      if (p[0] === 'format') { isAscii = p[1] === 'ascii'; isBinaryLE = p[1] === 'binary_little_endian'; }
+      if (p[0] === 'element' && p[1] === 'vertex') vertexCount = parseInt(p[2]);
+      if (p[0] === 'property' && p[1] !== 'list') {
+        props.push({ name: p[2], type: p[1], offset: bytesPerVertex, size: TYPE_SIZE[p[1]] || 4 });
+        bytesPerVertex += TYPE_SIZE[p[1]] || 4;
+      }
+    }
+    props.forEach((p, i) => {
+      if      (p.name === 'x')                       xI = i;
+      else if (p.name === 'y')                       yI = i;
+      else if (p.name === 'z')                       zI = i;
+      else if (p.name === 'red'   || p.name === 'r') rI = i;
+      else if (p.name === 'green' || p.name === 'g') gI = i;
+      else if (p.name === 'blue'  || p.name === 'b') bI = i;
+    });
+    buf = buf.slice(new TextEncoder().encode(text.slice(0, ei + endMark.length)).length);
+    return true;
+  }
+
+  function updateDraw() {
+    if (filled - lastUpdate < Math.ceil(vertexCount / 20) && filled < vertexCount) return;
+    cloud.geometry.setDrawRange(0, filled);
+    cloud.geometry.attributes.position.needsUpdate = true;
+    cloud.geometry.attributes.color.needsUpdate = true;
+    lastUpdate = filled;
+    status.textContent = `Loading… ${Math.round(filled / vertexCount * 100)}%`;
+  }
+
+  function processBinary() {
+    const view = new DataView(buf.buffer);
+    const n = Math.min(Math.floor(buf.length / bytesPerVertex), vertexCount - filled);
+    for (let i = 0; i < n; i++) {
+      const base = i * bytesPerVertex, i3 = (filled + i) * 3;
+      posArr[i3]   = typeRead(view, props[xI].type, base + props[xI].offset, isBinaryLE);
+      posArr[i3+1] = typeRead(view, props[yI].type, base + props[yI].offset, isBinaryLE);
+      posArr[i3+2] = typeRead(view, props[zI].type, base + props[zI].offset, isBinaryLE);
+      if (rI >= 0) {
+        const s = (props[rI].type === 'uchar' || props[rI].type === 'uint8') ? 1/255 : 1;
+        colArr[i3]   = typeRead(view, props[rI].type, base + props[rI].offset, isBinaryLE) * s;
+        colArr[i3+1] = typeRead(view, props[gI].type, base + props[gI].offset, isBinaryLE) * s;
+        colArr[i3+2] = typeRead(view, props[bI].type, base + props[bI].offset, isBinaryLE) * s;
+      } else {
+        colArr[i3] = colArr[i3+1] = colArr[i3+2] = 1;
+      }
+    }
+    filled += n;
+    buf = buf.slice(n * bytesPerVertex);
+    updateDraw();
+  }
+
+  function processAscii() {
+    const text = dec.decode(buf);
+    buf = new Uint8Array(0);
+    const lines = (asciiTail + text).split('\n');
+    asciiTail = lines.pop();
+    for (const line of lines) {
+      if (filled >= vertexCount) break;
+      const v = line.trim().split(/\s+/);
+      if (v.length <= Math.max(xI, yI, zI)) continue;
+      const i3 = filled * 3;
+      posArr[i3]   = parseFloat(v[xI]);
+      posArr[i3+1] = parseFloat(v[yI]);
+      posArr[i3+2] = parseFloat(v[zI]);
+      if (rI >= 0) {
+        const s = (props[rI].type === 'uchar' || props[rI].type === 'uint8') ? 1/255 : 1;
+        colArr[i3]   = parseFloat(v[rI]) * s;
+        colArr[i3+1] = parseFloat(v[gI]) * s;
+        colArr[i3+2] = parseFloat(v[bI]) * s;
+      } else {
+        colArr[i3] = colArr[i3+1] = colArr[i3+2] = 1;
+      }
+      filled++;
+    }
+    updateDraw();
+  }
+
+  while (true) {
+    let done, value;
+    try { ({ done, value } = await reader.read()); }
+    catch (e) { if (e.name === 'AbortError') return; throw e; }
+    if (done) break;
+    appendBuf(value);
+
+    if (!headerDone) {
+      headerDone = parseHeader();
+      if (headerDone) {
+        if (vertexCount <= 0) throw new Error('PLY: no vertex count in header');
+        posArr = new Float32Array(vertexCount * 3);
+        colArr = new Float32Array(vertexCount * 3);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(colArr, 3));
+        geo.setDrawRange(0, 0);
+        if (cloud) scene.remove(cloud);
+        cloud = new THREE.Points(geo, material);
+        cloud.rotation.set(Math.PI, 0, 0);  // match desktop viewer default orientation
+        scene.add(cloud);
+        if (buf.length) { if (isAscii) processAscii(); else processBinary(); }
+      }
+    } else {
+      if (isAscii) processAscii(); else processBinary();
+    }
+  }
+
+  if (myAc.signal.aborted) return;
+
+  // Finalize: center cloud, frame camera, scale helpers + point size
+  cloud.geometry.setDrawRange(0, filled);
+  cloud.geometry.attributes.position.needsUpdate = true;
+  cloud.geometry.attributes.color.needsUpdate = true;
+  cloud.geometry.computeBoundingBox();
+  const box = cloud.geometry.boundingBox;
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  sceneSize = box.getSize(new THREE.Vector3()).length();
+  cloud.position.set(-center.x, -center.y, -center.z);
+
+  szBase = sceneSize * 0.0024;     // (size * 0.0008) at default slider=3 → matches desktop
+  applyPointSize();
+  scaleHelpers(sceneSize);
+
+  camera.position.set(0, 0, sceneSize * 0.8);
+  camera.near = sceneSize * 0.0005;
+  camera.far  = sceneSize * 20;
+  camera.updateProjectionMatrix();
+  controls.target.set(0, 0, 0);
+  controls.minDistance = sceneSize * 0.001;
+  controls.maxDistance = sceneSize * 10;
+  controls.update();
+  status.classList.add('hidden');
 }
 
 // ── Pointer handling for rotate-model mode ────────────────────────────────────
-const canvasParent = document.body;
-
-canvasParent.addEventListener('pointerdown', e => {
+const dom = renderer.domElement;
+dom.addEventListener('pointerdown', e => {
   if (!lockMode) return;
-  if (e.target.tagName !== 'CANVAS') return;
   drag.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (drag.pointers.size === 1) {
     drag.active = true;
@@ -290,91 +478,66 @@ canvasParent.addEventListener('pointerdown', e => {
     drag.lastY = e.clientY;
   }
 });
-
-canvasParent.addEventListener('pointermove', e => {
-  if (!lockMode || !drag.active || !viewer?.splatMesh) return;
+dom.addEventListener('pointermove', e => {
+  if (!lockMode || !drag.active || !cloud) return;
   if (!drag.pointers.has(e.pointerId)) return;
   drag.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-  // single-finger drag rotates around world Y (yaw) and screen-X (pitch)
   if (drag.pointers.size === 1) {
     const dx = e.clientX - drag.lastX;
     const dy = e.clientY - drag.lastY;
     drag.lastX = e.clientX;
     drag.lastY = e.clientY;
     const SENS = 0.5 * D2R;
-    viewer.splatMesh.rotation.y += dx * SENS;
-    viewer.splatMesh.rotation.x += dy * SENS;
+    cloud.rotation.y += dx * SENS;
+    cloud.rotation.x += dy * SENS;
   }
 });
-
 function endPointer(e) {
   drag.pointers.delete(e.pointerId);
   if (drag.pointers.size === 0) drag.active = false;
   else {
-    // continue tracking from the remaining pointer
     const p = drag.pointers.values().next().value;
     drag.lastX = p.x; drag.lastY = p.y;
   }
 }
-canvasParent.addEventListener('pointerup',     endPointer);
-canvasParent.addEventListener('pointercancel', endPointer);
+dom.addEventListener('pointerup',     endPointer);
+dom.addEventListener('pointercancel', endPointer);
 
-// ── Load scene ────────────────────────────────────────────────────────────────
-async function loadScene(url) {
-  if (url.startsWith('/splats/'))
-    history.replaceState(null, '', '?model=' + encodeURIComponent(url.slice(8)));
-  status.textContent = 'Loading…';
-  status.classList.remove('hidden');
-  buildViewer();
-  setupControls();
-  try {
-    await viewer.addSplatScene(url, {
-      splatAlphaRemovalThreshold: parseInt($('alpha-range').value),
-      showLoadingUI: false,
-      progressiveLoad: true,
-    });
-    // reset rotation + helpers on new scene
-    if (viewer.splatMesh) viewer.splatMesh.rotation.set(0, 0, 0);
-    helpers = null;
-    updateHelpersVisibility();
-    applyDotSize();
-    status.classList.add('hidden');
-  } catch (e) {
-    status.textContent = 'Failed: ' + e.message;
-  }
+// ── Render loop ───────────────────────────────────────────────────────────────
+function tick() {
+  requestAnimationFrame(tick);
+  if (controls.enabled) controls.update();
+  renderer.render(scene, camera);
 }
+tick();
 
-// ── Mode toggle (orbit vs rotate-model) ───────────────────────────────────────
+// ── Mode + buttons ────────────────────────────────────────────────────────────
 function showPill(text) {
   modePill.textContent = text;
   modePill.classList.add('show');
   clearTimeout(showPill._t);
   showPill._t = setTimeout(() => modePill.classList.remove('show'), 1200);
 }
-
+function updateHelpersVisibility() {
+  gridHelper.visible = axesHelper.visible = (axesOn || lockMode);
+}
 function setLockMode(on) {
   lockMode = on;
-  if (controls) controls.enabled = !on;
+  controls.enabled = !on;
   $('lock-btn').classList.toggle('active', on);
-  $('lock-btn').querySelector('span:last-child').textContent = on ? 'Orbit Camera' : 'Rotate Model';
+  $('lock-label').textContent = on ? 'Orbit Camera' : 'Rotate Model';
   $('lock-btn').querySelector('.ico').textContent = on ? '🔓' : '🔒';
   updateHelpersVisibility();
   showPill(on ? 'Rotate Model — drag to spin' : 'Orbit Mode');
 }
-
 $('lock-btn').addEventListener('click', () => setLockMode(!lockMode));
-
 $('reset-btn').addEventListener('click', () => {
-  if (viewer?.splatMesh) viewer.splatMesh.rotation.set(0, 0, 0);
-  if (controls) {
-    viewer.camera.position.set(0, 0, 3);
-    controls.target.set(0, 0, 0);
-    controls.update();
-  }
+  if (cloud) cloud.rotation.set(Math.PI, 0, 0);
+  camera.position.set(0, 0, sceneSize * 0.8);
+  controls.target.set(0, 0, 0);
+  controls.update();
   showPill('Reset');
 });
-
 $('axes-btn').addEventListener('click', () => {
   axesOn = !axesOn;
   $('axes-btn').classList.toggle('active', axesOn);
@@ -383,65 +546,93 @@ $('axes-btn').addEventListener('click', () => {
 
 // ── Settings sheet ────────────────────────────────────────────────────────────
 const sheet = $('sheet'), sheetBg = $('sheet-bg');
-function openSheet()  { sheet.classList.add('open');  sheetBg.classList.add('open');  }
-function closeSheet() { sheet.classList.remove('open'); sheetBg.classList.remove('open'); }
-$('settings-btn').addEventListener('click', openSheet);
-sheetBg.addEventListener('click', closeSheet);
-$('sheet-handle').addEventListener('click', closeSheet);
+$('settings-btn').addEventListener('click', () => { sheet.classList.add('open'); sheetBg.classList.add('open'); });
+sheetBg.addEventListener('click', () => { sheet.classList.remove('open'); sheetBg.classList.remove('open'); });
+$('sheet-handle').addEventListener('click', () => { sheet.classList.remove('open'); sheetBg.classList.remove('open'); });
 
-$('up-select').addEventListener('change', () => {
-  if (select.value) loadScene('/splats/' + select.value);
-});
-$('alpha-range').addEventListener('input', e => { $('alpha-val').textContent = e.target.value; });
-$('alpha-range').addEventListener('change', () => {
-  if (select.value) loadScene('/splats/' + select.value);
-});
+$('sz').addEventListener('input', applyPointSize);
 
-function applyDotSize() {
-  const s = parseFloat($('size-range').value);
-  $('size-val').textContent = s.toFixed(2) + '×';
-  const mesh = viewer?.splatMesh;
-  if (!mesh) return;
-  // Write to whichever uniform / property the library version exposes
-  const u = mesh.material?.uniforms;
-  if (u?.splatScale)  u.splatScale.value  = s;
-  if (u?.pointScale)  u.pointScale.value  = s;
-  if (typeof mesh.setSplatScale === 'function') mesh.setSplatScale(s);
+// ── Dropdown / loading ────────────────────────────────────────────────────────
+const FALLBACK = 'result_conf07_simplified.ply';
+
+function plyUrl(collection, name) {
+  return collection === 'apex'
+    ? `/apex-runs/${encodeURIComponent(name)}/pointcloud.ply?shuffle=1`
+    : `/examples/${encodeURIComponent(name)}?shuffle=1`;
 }
-$('size-range').addEventListener('input', applyDotSize);
 
-// ── Dropdown ──────────────────────────────────────────────────────────────────
 async function populateDropdown() {
+  status.textContent = 'Loading…';
+  status.classList.remove('hidden');
   try {
-    const files = await fetch('/splats/list').then(r => r.json());
-    if (!files.length) throw new Error('empty');
-    files.sort((a, b) => {
-      if (a === PREFERRED) return -1;
-      if (b === PREFERRED) return  1;
-      return b.localeCompare(a);
+    const names = currentCollection === 'apex'
+      ? await fetch('/apex-runs/list').then(r => r.json())
+      : await fetch('/examples/models.json').then(r => r.json());
+    if (!names.length) throw new Error('empty');
+
+    const p = new URLSearchParams(location.search);
+    const urlColl  = p.get('collection') || 'examples';
+    const urlModel = p.get('model');
+    const preferred = (urlColl === currentCollection && urlModel && names.includes(urlModel))
+      ? urlModel
+      : (currentCollection === 'examples' && names.includes(FALLBACK) ? FALLBACK : null);
+
+    names.sort((a, b) => {
+      if (a === preferred) return -1;
+      if (b === preferred) return  1;
+      return a.localeCompare(b);
     });
-    select.innerHTML = files.map(f =>
-      `<option value="${f}"${f === PREFERRED ? ' selected' : ''}>${f}</option>`
+
+    select.innerHTML = names.map(n =>
+      `<option value="${n}"${n === preferred ? ' selected' : ''}>${n}</option>`
     ).join('');
-    loadScene('/splats/' + (files.includes(PREFERRED) ? PREFERRED : files[0]));
+
+    loadModel();
   } catch {
-    select.innerHTML = '<option value="">No splats found</option>';
-    status.textContent = 'No .ply files on server.';
+    select.innerHTML = '<option value="">No models found</option>';
+    status.textContent = currentCollection === 'apex'
+      ? 'No Apex runs found on server.'
+      : 'No example models found.';
   }
 }
 
-select.addEventListener('change', () => { if (select.value) loadScene('/splats/' + select.value); });
+function loadModel() {
+  if (!select.value) return;
+  status.textContent = 'Loading…';
+  status.classList.remove('hidden');
+  const url = plyUrl(currentCollection, select.value);
+  const p = new URLSearchParams(location.search);
+  p.set('collection', currentCollection);
+  p.set('model', select.value);
+  history.replaceState(null, '', '?' + p.toString());
+  streamPly(url).catch(e => {
+    status.textContent = 'Failed: ' + e.message;
+  });
+}
+
+select.addEventListener('change', loadModel);
+collTabs.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-coll]');
+  if (!btn || btn.dataset.coll === currentCollection) return;
+  setCollection(btn.dataset.coll);
+  populateDropdown();
+});
 
 $('copy-link-btn').addEventListener('click', e => {
   e.preventDefault();
   navigator.clipboard?.writeText(location.href).then(() => {
-    const prev = $('copy-link-btn').textContent;
-    $('copy-link-btn').textContent = '✓ Copied!';
-    setTimeout(() => { $('copy-link-btn').textContent = prev; }, 1500);
+    const btn = $('copy-link-btn');
+    const prev = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = prev; }, 1500);
   });
 });
 
-// prevent browser pull-to-refresh / pinch-zoom anywhere on body
+// honor ?collection=… on first load
+const initColl = new URLSearchParams(location.search).get('collection');
+if (initColl === 'apex' || initColl === 'examples') setCollection(initColl);
+
+// prevent browser pinch-zoom
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('touchmove', e => {
   if (e.touches.length > 1) e.preventDefault();
