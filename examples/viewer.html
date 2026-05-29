@@ -117,6 +117,7 @@
     <label>Rotate Z <span id="rz-val">0°</span></label>
     <input type="range" id="rz" min="-180" max="180" step="1" value="0">
   </div>
+  <button id="save-rot">Set as Default View</button>
   <button id="reset-rot">Reset Rotation</button>
 </div>
 
@@ -271,6 +272,40 @@ async function streamPly(source) {
   let posArr, colArr;
   let filled = 0, lastUpdate = 0;
   let asciiTail = '';
+  let sceneSized = false;
+  let savedView = null;
+
+  // Size/center the scene once we have enough partial vertices, so the model
+  // doesn't appear oversized (or off-center) during streaming.
+  function trySizeScene() {
+    if (sceneSized || filled < Math.min(1000, vertexCount)) return;
+    let minX=Infinity, minY=Infinity, minZ=Infinity;
+    let maxX=-Infinity, maxY=-Infinity, maxZ=-Infinity;
+    for (let i = 0; i < filled; i++) {
+      const i3 = i * 3;
+      const x = posArr[i3], y = posArr[i3+1], z = posArr[i3+2];
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    const sceneSize = Math.hypot(maxX-minX, maxY-minY, maxZ-minZ);
+    if (!isFinite(sceneSize) || sceneSize === 0) return;
+    cloud.position.set(-(minX+maxX)/2, -(minY+maxY)/2, -(minZ+maxZ)/2);
+    material.size = sceneSize * parseFloat(document.getElementById('sz').value) * 0.0008;
+    moveSpeed = sceneSize * 0.3;
+    scaleHelpers(sceneSize);
+    if (savedView && savedView.camera) {
+      const p = savedView.camera.position, q = savedView.camera.quaternion;
+      camera.position.set(p.x, p.y, p.z);
+      if (q) camera.quaternion.set(q[0], q[1], q[2], q[3]);
+    } else {
+      camera.position.set(0, 0, sceneSize * 0.8);
+    }
+    camera.near = sceneSize * 0.0005;
+    camera.far  = sceneSize * 20;
+    camera.updateProjectionMatrix();
+    sceneSized = true;
+  }
 
   function parseHeader() {
     const text = dec.decode(buf);
@@ -304,6 +339,7 @@ async function streamPly(source) {
     cloud.geometry.attributes.position.needsUpdate = true;
     cloud.geometry.attributes.color.needsUpdate = true;
     lastUpdate = filled;
+    trySizeScene();
     status.textContent = `Loading… ${Math.round(filled / vertexCount * 100)}%`;
   }
 
@@ -375,12 +411,14 @@ async function streamPly(source) {
         geo.setDrawRange(0, 0);
         if (cloud) scene.remove(cloud);
         cloud = new THREE.Points(geo, material);
-        cloud.rotation.set(Math.PI, 0, 0);
-        document.getElementById('rx').value = 180;
-        document.getElementById('rx-val').textContent = '180°';
-        ['ry', 'rz'].forEach(id => {
-          document.getElementById(id).value = 0;
-          document.getElementById(id + '-val').textContent = '0°';
+        savedView = loadDefaultView(currentLoad.collection, currentLoad.model);
+        const initRot = (savedView && savedView.rotation) || { x: 180, y: 0, z: 0 };
+        cloud.rotation.set(initRot.x * D2R, initRot.y * D2R, initRot.z * D2R);
+        ['rx','ry','rz'].forEach(id => {
+          const k = id[1];
+          const v = Math.round(initRot[k]);
+          document.getElementById(id).value = v;
+          document.getElementById(id + '-val').textContent = v + '°';
         });
         scene.add(cloud);
         if (buf.length) { if (isAscii) processAscii(); else processBinary(); }
@@ -405,7 +443,9 @@ async function streamPly(source) {
   material.size = size * parseFloat(document.getElementById('sz').value) * 0.0008;
   moveSpeed = size * 0.3;
   scaleHelpers(size);
-  camera.position.set(0, 0, size * 0.8);
+  if (!(savedView && savedView.camera) && !sceneSized) {
+    camera.position.set(0, 0, size * 0.8);
+  }
   camera.near = size * 0.0005;
   camera.far  = size * 20;
   camera.updateProjectionMatrix();
@@ -414,7 +454,31 @@ async function streamPly(source) {
 
 // ── Collection + model dropdown ───────────────────────────────────────────────
 const FALLBACK         = 'result_conf07_simplified.ply';
+const DEFAULT_COLLECTION = 'apex';
+const DEFAULT_MODEL      = { apex: 'LOMAS-VERDES' };
 const collectionSelect = document.getElementById('collection-select');
+
+// ── Per-model default view (rotation + camera) in localStorage ────────────────
+// Stored shape: { rotation: {x,y,z}°, camera: { position: {x,y,z}, quaternion: [x,y,z,w] } }
+// Older saves were just {x,y,z} (rotation only) — normalized on read.
+const ROT_KEY = 'splat:default-rotation';
+function rotKey(collection, name) { return `${collection}::${name}`; }
+function loadDefaultView(collection, name) {
+  try {
+    const all = JSON.parse(localStorage.getItem(ROT_KEY) || '{}');
+    const v = all[rotKey(collection, name)];
+    if (!v) return null;
+    return ('rotation' in v) ? v : { rotation: v };
+  } catch { return null; }
+}
+function saveDefaultView(collection, name, view) {
+  try {
+    const all = JSON.parse(localStorage.getItem(ROT_KEY) || '{}');
+    all[rotKey(collection, name)] = view;
+    localStorage.setItem(ROT_KEY, JSON.stringify(all));
+  } catch {}
+}
+let currentLoad = { collection: null, model: null };
 
 function plyUrl(collection, name) {
   return collection === 'apex'
@@ -435,11 +499,13 @@ async function populateDropdown() {
 
     // Read both ?collection= and ?model= from URL
     const p          = new URLSearchParams(location.search);
-    const urlColl    = p.get('collection') || 'examples';  // no param → examples
+    const urlColl    = p.get('collection') || DEFAULT_COLLECTION;
     const urlModel   = p.get('model');
+    const collDefault = DEFAULT_MODEL[collection];
     const preferred  = (urlColl === collection && urlModel && names.includes(urlModel))
       ? urlModel
-      : (collection === 'examples' && names.includes(FALLBACK) ? FALLBACK : null);
+      : (collDefault && names.includes(collDefault) ? collDefault
+         : (collection === 'examples' && names.includes(FALLBACK) ? FALLBACK : null));
 
     names.sort((a, b) => {
       if (a === preferred) return -1;
@@ -460,6 +526,7 @@ async function populateDropdown() {
 
 function loadFile(collection, name) {
   history.replaceState(null, '', '?' + new URLSearchParams({ collection, model: name }));
+  currentLoad = { collection, model: name };
   const url = plyUrl(collection, name);
   status.textContent = 'Loading…'; status.style.display = 'block';
   streamPly(url).catch(err => { status.textContent = `Failed to load: ${err.message}`; });
@@ -479,10 +546,10 @@ document.getElementById('copy-link-btn').addEventListener('click', () => {
   });
 });
 
-// Restore collection from URL before first fetch
+// Restore collection from URL (or fall back to DEFAULT_COLLECTION) before first fetch
 {
-  const initColl = new URLSearchParams(location.search).get('collection');
-  if (initColl && [...collectionSelect.options].some(o => o.value === initColl))
+  const initColl = new URLSearchParams(location.search).get('collection') || DEFAULT_COLLECTION;
+  if ([...collectionSelect.options].some(o => o.value === initColl))
     collectionSelect.value = initColl;
 }
 populateDropdown();
@@ -544,6 +611,26 @@ document.getElementById('reset-rot').addEventListener('click', () => {
   if (cloud) cloud.rotation.set(Math.PI, 0, 0);
 });
 
+document.getElementById('save-rot').addEventListener('click', () => {
+  if (!cloud || !currentLoad.model) return;
+  const view = {
+    rotation: {
+      x: wrapDeg(cloud.rotation.x * R2D),
+      y: wrapDeg(cloud.rotation.y * R2D),
+      z: wrapDeg(cloud.rotation.z * R2D),
+    },
+    camera: {
+      position:   { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      quaternion: [camera.quaternion.x, camera.quaternion.y, camera.quaternion.z, camera.quaternion.w],
+    },
+  };
+  saveDefaultView(currentLoad.collection, currentLoad.model, view);
+  const btn = document.getElementById('save-rot');
+  const prev = btn.textContent;
+  btn.textContent = '✓ Saved as default';
+  setTimeout(() => { btn.textContent = prev; }, 1800);
+});
+
 // ── Middle-mouse model rotation ───────────────────────────────────────────────
 const R2D = 180 / Math.PI;
 const MM_SENS = 0.4; // degrees per pixel
@@ -551,13 +638,19 @@ const MM_SENS = 0.4; // degrees per pixel
 let mmDragging = false;
 let mmLast = { x: 0, y: 0 };
 
-// Keep sliders in sync after any programmatic rotation
+// Wrap any angle (in degrees) into (-180, 180]
+const wrapDeg = d => { const m = ((d + 180) % 360 + 360) % 360 - 180; return m === -180 ? 180 : m; };
+
+// Keep sliders in sync after any programmatic rotation. Also wrap the live
+// cloud.rotation so middle-mouse drags don't accumulate past ±180° and lose sync.
 function syncRotSliders() {
   if (!cloud) return;
-  const clamp = v => Math.max(-180, Math.min(180, Math.round(v)));
-  const rx = clamp(cloud.rotation.x * R2D);
-  const ry = clamp(cloud.rotation.y * R2D);
-  const rz = clamp(cloud.rotation.z * R2D);
+  cloud.rotation.x = wrapDeg(cloud.rotation.x * R2D) * D2R;
+  cloud.rotation.y = wrapDeg(cloud.rotation.y * R2D) * D2R;
+  cloud.rotation.z = wrapDeg(cloud.rotation.z * R2D) * D2R;
+  const rx = Math.round(cloud.rotation.x * R2D);
+  const ry = Math.round(cloud.rotation.y * R2D);
+  const rz = Math.round(cloud.rotation.z * R2D);
   document.getElementById('rx').value = rx; document.getElementById('rx-val').textContent = rx + '°';
   document.getElementById('ry').value = ry; document.getElementById('ry-val').textContent = ry + '°';
   document.getElementById('rz').value = rz; document.getElementById('rz-val').textContent = rz + '°';
